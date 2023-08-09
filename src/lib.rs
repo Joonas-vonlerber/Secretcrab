@@ -61,15 +61,13 @@ pub mod RSA {
             271, 277, 281, 283, 293, 307, 311, 313, 317, 331, 337, 347, 349,
         ]
         .map(BigUint::from);
-        loop {
+        random_number = rng.gen_biguint(n);
+        random_number.set_bit(n - 1, true);
+        while low_level_primes.iter().any(|divisor| {
+            &random_number % divisor == BigUint::zero() && divisor * divisor <= random_number
+        }) {
             random_number = rng.gen_biguint(n);
             random_number.set_bit(n - 1, true);
-            if low_level_primes.iter().any(|divisor| {
-                &random_number % divisor == BigUint::zero() && divisor * divisor <= random_number
-            }) {
-                continue;
-            }
-            break;
         }
         random_number
     }
