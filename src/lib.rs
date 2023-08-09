@@ -3,26 +3,31 @@
 pub mod RSA {
     use num::{bigint::RandBigInt, BigInt, BigUint, Integer, One, Zero};
     use rand::prelude::*;
+    #[derive(Debug, PartialEq)]
     pub struct RSAkeypair {
         pub public_key: BigUint,
         pub private_key: BigUint,
         pub modulo: BigUint,
     }
 
-    pub fn encrypt(msg: &str, key: &BigUint, modulo: &BigUint) -> BigUint {
-        let bytes = msg.as_bytes();
-        let text_int = BigUint::from_bytes_be(bytes);
+    // pub fn write_to_file(keypair: &RSAkeypair) -> io::Result<()> {
+    //     // I could create a ssh rsa key in the correct format but don't want to be responsible for errors :DD
+    //     let RSAkeypair {
+    //         public_key,
+    //         private_key,
+    //         modulo,
+    //     } = keypair;
+    //     let modulo_bytes = modulo.to_bytes_be();
+    //     let public_bytes = public_key.to_bytes_be();
+    // }
+    pub fn encrypt(msg: &[u8], key: &BigUint, modulo: &BigUint) -> BigUint {
+        let text_int = BigUint::from_bytes_be(msg);
         text_int.modpow(key, modulo)
     }
 
-    pub fn decrypt(
-        encrypted_msg: &BigUint,
-        key: &BigUint,
-        modulo: &BigUint,
-    ) -> Result<String, std::string::FromUtf8Error> {
+    pub fn decrypt(encrypted_msg: &BigUint, key: &BigUint, modulo: &BigUint) -> Vec<u8> {
         let text_int = encrypted_msg.modpow(key, modulo);
-        let bytes = text_int.to_bytes_be();
-        String::from_utf8(bytes)
+        text_int.to_bytes_be()
     }
 
     pub fn generate_keys_modulo(bits: u64) -> RSAkeypair {
@@ -58,7 +63,7 @@ pub mod RSA {
         .map(BigUint::from);
         loop {
             random_number = rng.gen_biguint(n);
-            random_number.set_bit(random_number.bits(), true);
+            random_number.set_bit(n - 1, true);
             if low_level_primes.iter().any(|divisor| {
                 &random_number % divisor == BigUint::zero() && divisor * divisor <= random_number
             }) {
