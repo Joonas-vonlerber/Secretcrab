@@ -1,5 +1,5 @@
 #![allow(dead_code, non_snake_case)]
-#![feature(slice_as_chunks)]
+#![feature(slice_as_chunks, array_zip, slice_flatten, iter_collect_into)]
 
 pub mod Hash;
 pub mod RSA {
@@ -127,9 +127,24 @@ pub mod RSA {
 #[cfg(test)]
 mod tests {
     extern crate rustc_serialize as rustc_ser;
-    use crate::Hash::SHA::{sha_1, sha_256, sha_512, sha_512_to_244, sha_512_to_256};
+    use crate::Hash::SHA::{sha_1, sha_256, sha_3_244, sha_512, sha_512_to_244, sha_512_to_256};
+    use crate::RSA::*;
     use rustc_ser::hex::ToHex;
     use std::env;
+    #[test]
+    fn RSA_test() {
+        env::set_var("RUST_BACKTRACE", "1");
+        let RSAkeypair {
+            public_key,
+            private_key,
+            modulo,
+        } = generate_keys_modulo(256);
+
+        let msg = "Hello, World!";
+        let encrypted_message = use_key(msg.as_bytes(), &public_key, &modulo);
+        let decrypted_message = use_key(&encrypted_message, &private_key, &modulo);
+        assert_eq!(String::from_utf8(decrypted_message).unwrap(), msg);
+    }
     #[test]
     fn sha1_test() {
         env::set_var("RUST_BACKTRACE", "1");
@@ -195,7 +210,7 @@ mod tests {
         );
     }
     #[test]
-    fn sha_512_with_t_test() {
+    fn sha_512_to_t_test() {
         let hello_hash_244 = sha_512_to_244(b"Hello").as_slice().to_hex();
         assert_eq!(
             hello_hash_244,
@@ -205,6 +220,14 @@ mod tests {
         assert_eq!(
             hello_hash_256,
             "7e75b18b88d2cb8be95b05ec611e54e2460408a2dcf858f945686446c9d07aac".to_owned()
+        );
+    }
+    #[test]
+    fn sha_3_224_test() {
+        let hello_hash_224 = sha_3_244(b"Hello").to_hex();
+        assert_eq!(
+            hello_hash_224,
+            "4cf679344af02c2b89e4a902f939f4608bcac0fbf81511da13d7d9b9".to_owned()
         );
     }
 }

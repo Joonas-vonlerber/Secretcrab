@@ -1,13 +1,4 @@
-#[derive(Debug, PartialEq)]
-enum OutputSize {
-    SHA256,
-    SHA224,
-    SHA512,
-    SHA384,
-    SHA512With224,
-    SHA512With256,
-}
-
+use crate::Hash::Keccak::*;
 #[derive(Debug, PartialEq)]
 enum BlockSize {
     Bits512,
@@ -507,6 +498,7 @@ pub fn sha_384(input: &[u8]) -> [u8; 48] {
     .unwrap()
 }
 
+//boilerplait go brr
 fn sha_512_IV_generating_function(input: &[u8]) -> [u8; 64] {
     let (mut h0, mut h1, mut h2, mut h3, mut h4, mut h5, mut h6, mut h7) = (
         0x6a09e667f3bcc908u64 ^ 0xa5a5a5a5a5a5a5a5,
@@ -605,7 +597,7 @@ pub fn sha_512_to_244(input: &[u8]) -> [u8; 28] {
             .collect::<Vec<u64>>()
             .try_into()
             .unwrap()
-    };
+    }; // SAFETY: 64 is divisible by 8
     let mut a: u64;
     let mut b: u64;
     let mut c: u64;
@@ -693,7 +685,7 @@ pub fn sha_512_to_256(input: &[u8]) -> [u8; 32] {
             .collect::<Vec<u64>>()
             .try_into()
             .unwrap()
-    };
+    }; // SAFETY: 64 is divisbe by 8
     let mut a: u64;
     let mut b: u64;
     let mut c: u64;
@@ -865,3 +857,19 @@ const SHA512_K: [u64; 80] = [
     0x5fcb6fab3ad6faec,
     0x6c44198c4a475817,
 ];
+
+pub fn sha_3_244(input: &[u8]) -> [u8; 28] {
+    keccak::<28>(input, 144)
+}
+
+pub fn sha_3_256(input: &[u8]) -> [u8; 32] {
+    keccak::<32>(input, 316)
+}
+
+pub fn sha_3_384(input: &[u8]) -> [u8; 48] {
+    keccak::<48>(input, 104)
+}
+
+pub fn sha_3_512(input: &[u8]) -> [u8; 64] {
+    keccak::<64>(input, 72)
+}
