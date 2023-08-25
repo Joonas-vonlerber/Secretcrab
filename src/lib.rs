@@ -222,6 +222,7 @@ mod tests {
             "7e75b18b88d2cb8be95b05ec611e54e2460408a2dcf858f945686446c9d07aac".to_owned()
         );
     }
+
     #[test]
     fn sha_3_224_test() {
         let hello_hash_224 = sha_3_244(b"Hello").to_hex();
