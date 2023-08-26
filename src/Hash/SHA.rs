@@ -685,7 +685,7 @@ pub fn sha_512_to_256(input: &[u8]) -> [u8; 32] {
             .collect::<Vec<u64>>()
             .try_into()
             .unwrap()
-    }; // SAFETY: 64 is divisbe by 8
+    }; // SAFETY: 64 is divisible by 8
     let mut a: u64;
     let mut b: u64;
     let mut c: u64;
@@ -859,17 +859,25 @@ const SHA512_K: [u64; 80] = [
 ];
 
 pub fn sha_3_244(input: &[u8]) -> [u8; 28] {
-    keccak::<28>(input, 144)
+    keccak::<28>(input, 144, 0x06)
 }
 
 pub fn sha_3_256(input: &[u8]) -> [u8; 32] {
-    keccak::<32>(input, 316)
+    keccak::<32>(input, 316, 0x06)
 }
 
 pub fn sha_3_384(input: &[u8]) -> [u8; 48] {
-    keccak::<48>(input, 104)
+    keccak::<48>(input, 104, 0x06)
 }
 
 pub fn sha_3_512(input: &[u8]) -> [u8; 64] {
-    keccak::<64>(input, 72)
+    keccak::<64>(input, 72, 0x06)
+}
+
+pub fn shake_128<const OUTPUT_LEN: usize>(input: &[u8]) -> [u8; OUTPUT_LEN] {
+    keccak::<OUTPUT_LEN>(input, 168, 0x1F)
+}
+
+pub fn shake_256<const OUTPUT_LEN: usize>(input: &[u8]) -> [u8; OUTPUT_LEN] {
+    keccak::<OUTPUT_LEN>(input, 136, 0x1F)
 }

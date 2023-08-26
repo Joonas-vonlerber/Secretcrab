@@ -2,8 +2,12 @@ pub mod SHA;
 
 pub mod Keccak {
 
-    pub fn keccak<const OUTPUT_LEN: usize>(input: &[u8], rate: usize) -> [u8; OUTPUT_LEN] {
-        sponge::<_, _, OUTPUT_LEN>(keccak_f_1600, padding_sha3, rate, input)
+    pub fn keccak<const OUTPUT_LEN: usize>(
+        input: &[u8],
+        rate: usize,
+        delimited_suffix: u8,
+    ) -> [u8; OUTPUT_LEN] {
+        sponge::<_, _, OUTPUT_LEN>(keccak_f_1600, keccak_padding, rate, input, delimited_suffix)
     }
 
     const ROUND_CONSTANTS: [u64; 24] = [
@@ -42,37 +46,30 @@ pub mod Keccak {
         pad_fun: F2,
         rate: usize,
         input: &[u8],
+        delimited_suffix: u8,
     ) -> [u8; OUTPUT_LEN]
     where
-        F1: Fn(&Array2<u64>) -> Array2<u64>,
-        F2: Fn(&[u8], usize) -> Vec<u8>,
+        F1: Fn(&mut Vec<u8>),
+        F2: Fn(&[u8], usize, u8) -> Vec<u8>,
     {
-        let padded_message: Vec<u8> = pad_fun(input, rate);
+        let padded_message: Vec<u8> = pad_fun(input, rate, delimited_suffix);
         assert_eq!(padded_message.len() % rate, 0);
 
-        let mut block: Vec<u64>;
-        let mut array_block: Array2<u64>;
         let zero_block: Vec<u8> = [0x00].repeat(200 - rate);
-
-        let mut S: Array2<u64> = Array2::zeros((5, 5));
-
+        let mut state: Vec<u8> = [0x00; 200].to_vec();
         // Absorbion phase
         for P in padded_message.chunks(rate) {
-            block = [P, zero_block.as_slice()]
-                .concat()
-                .chunks(8)
-                .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap()))
-                .collect();
-            array_block = Array2::from_shape_vec((5, 5).f(), block).unwrap();
-            azip!((a in &mut array_block, &b in &S) *a ^= b); // zip them with the xor :D
-            S = perm_fun(&array_block);
+            state = state
+                .iter()
+                .zip([P, zero_block.as_slice()].concat().iter())
+                .map(|(a, b)| a ^ b)
+                .collect::<Vec<_>>();
+            perm_fun(&mut state);
         }
         // Squeeze phase
         if rate >= OUTPUT_LEN {
-            let hash: [u8; OUTPUT_LEN] = S
-                .into_raw_vec()
-                .iter() //lets hope this does like 0,0 -> 1,0 -> 2,0 ..
-                .flat_map(|i| i.to_be_bytes())
+            let hash: [u8; OUTPUT_LEN] = state
+                .into_iter()
                 .take(OUTPUT_LEN)
                 .collect::<Vec<_>>()
                 .try_into()
@@ -81,18 +78,16 @@ pub mod Keccak {
         };
 
         let mut output: Vec<u8> = Vec::new();
-        S.clone()
-            .into_raw_vec()
-            .iter()
-            .flat_map(|i| i.to_be_bytes())
+        state
+            .clone()
+            .into_iter()
             .take(OUTPUT_LEN)
             .collect_into(&mut output);
 
         while output.len() < OUTPUT_LEN {
-            S.clone()
-                .into_raw_vec()
-                .iter()
-                .flat_map(|i| i.to_be_bytes())
+            state
+                .clone()
+                .into_iter()
                 .take(OUTPUT_LEN)
                 .collect_into(&mut output);
         }
@@ -104,26 +99,31 @@ pub mod Keccak {
             .unwrap()
     }
 
-    pub fn keccak_f_1600(state: &Array2<u64>) -> Array2<u64> {
-        let mut state = state.clone();
+    pub fn keccak_f_1600(state: &mut Vec<u8>) {
+        let mut array: Array2<u64> = Array2::from_shape_vec(
+            (5, 5).f(),
+            state
+                .chunks(8)
+                .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap()))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         for i in ROUND_CONSTANTS.iter() {
-            // println!("{}\n\n\n", state);
-            state = round_1600(&state, *i);
+            round_1600(&mut array, *i);
         }
-        state
+        *state = array
+            .into_raw_vec()
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect::<Vec<_>>();
     }
 
-    pub fn round_1600(state: &Array2<u64>, round_constant: u64) -> Array2<u64> {
-        let mut state: Array2<u64> = state.clone();
-
-        theta_step(&mut state);
-        rho_step(&mut state);
-        let aux_state = pi_step(&state);
-        // println!("{}\n\n\n", aux_state);
-        xi_step(&mut state, &aux_state);
-        iota_step(&mut state, round_constant);
-
-        state
+    pub fn round_1600(state: &mut Array2<u64>, round_constant: u64) {
+        theta_step(state);
+        rho_step(state);
+        let aux_state = pi_step(state);
+        xi_step(state, &aux_state);
+        iota_step(state, round_constant);
     }
 
     pub fn theta_step(state: &mut Array2<u64>) {
@@ -172,11 +172,11 @@ pub mod Keccak {
         *state.index_mut(Ix2(0, 0)) ^= round_constant;
     }
 
-    fn padding_sha3(input: &[u8], rate: usize) -> Vec<u8> {
+    fn keccak_padding(input: &[u8], rate: usize, delimited_suffix: u8) -> Vec<u8> {
         let padding_needed = rate - (input.len() % rate);
         let padding_bytes: Vec<u8> = match padding_needed {
             0 => [
-                [0x06u8].as_slice(),
+                [delimited_suffix].as_slice(),
                 [0x00].repeat(rate - 2).as_slice(),
                 [0x80].as_slice(),
             ]
@@ -184,7 +184,7 @@ pub mod Keccak {
             1 => vec![0x86],
             2 => vec![0x06, 0x80],
             x => [
-                [0x06].as_slice(),
+                [delimited_suffix].as_slice(),
                 [0x00].repeat(x - 2).as_slice(),
                 [0x80].as_slice(),
             ]
@@ -346,6 +346,7 @@ mod keccak_tests {
         .unwrap();
         assert_eq!(aux_state, resulting_array);
     }
+
     #[test]
     fn xi_test() {
         let mut test_array: Array2<u64> = Array2::from_shape_vec(
@@ -399,46 +400,22 @@ mod keccak_tests {
     }
     #[test]
     fn keccak_f_1600_test() {
-        let test_array: Array2<u64> = Array2::from_shape_vec(
-            (5, 5).f(),
-            vec![
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24,
-            ],
-        )
-        .unwrap();
-        let result_array = keccak_f_1600(&test_array);
-        let should_array: Array2<u64> = Array2::from_shape_vec(
-            (5, 5),
-            vec![
-                9472389783892099349,
-                11661812091723830419,
-                825065683101361807,
-                17847697619892908514,
-                15330347418010067760,
-                2159377575142921216,
-                3517755057770134847,
-                6192414258352188799,
-                11598434253200954839,
-                12047099911907354591,
-                17826682512249813373,
-                5223775837645169598,
-                14426505790672879210,
-                6049795840392747215,
-                4763389569697138851,
-                2325963263767348549,
-                933274647126506074,
-                3326742392640380689,
-                8610635351954084385,
-                6779624089296570504,
-                15086930817298358378,
-                3451250694486589320,
-                16749975585634164134,
-                18234131770974529925,
-                15083668107635345971,
-            ],
-        )
-        .unwrap();
-        assert_eq!(result_array, should_array);
+        let mut test_array: Vec<u8> = (0..25u64).flat_map(|word| word.to_le_bytes()).collect();
+        keccak_f_1600(&mut test_array);
+        let should_array: Vec<u8> = vec![
+            21, 129, 237, 82, 82, 176, 116, 131, 0, 148, 86, 182, 118, 166, 247, 29, 125, 121, 81,
+            138, 75, 25, 101, 247, 69, 5, 118, 209, 67, 123, 71, 32, 106, 96, 246, 243, 164, 139,
+            95, 209, 147, 212, 141, 124, 79, 20, 215, 161, 63, 253, 56, 81, 150, 147, 209, 48, 190,
+            227, 27, 149, 114, 148, 126, 72, 90, 122, 218, 203, 88, 168, 243, 12, 136, 127, 177,
+            155, 56, 78, 229, 47, 143, 38, 159, 13, 222, 56, 115, 11, 127, 109, 37, 139, 245, 223,
+            239, 85, 106, 62, 44, 235, 148, 62, 53, 200, 17, 31, 144, 140, 148, 246, 42, 46, 166,
+            157, 48, 202, 12, 222, 115, 232, 226, 49, 77, 148, 108, 194, 175, 247, 215, 21, 196,
+            140, 128, 234, 245, 160, 207, 216, 62, 126, 67, 49, 245, 83, 33, 210, 164, 67, 59, 31,
+            127, 119, 133, 233, 153, 180, 60, 166, 12, 253, 48, 35, 209, 197, 192, 85, 192, 212,
+            223, 167, 224, 166, 138, 229, 47, 167, 163, 72, 153, 124, 147, 245, 26, 66, 136, 8, 52,
+            113, 48, 16, 22, 94, 51, 74, 126, 41, 58, 244, 83, 209,
+        ];
+        assert_eq!(should_array.len(), 200);
+        assert_eq!(test_array, should_array);
     }
 }
