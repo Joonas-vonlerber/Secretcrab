@@ -40,13 +40,7 @@ pub fn generate_RSA_keys_modulo(bits: u64) -> RSAkeypair {
 fn create_low_level_prime(n: u64) -> BigUint {
     let mut rng = thread_rng();
     let mut random_number: BigUint;
-    let low_level_primes: [BigUint; 70] = [
-        2u32, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83,
-        89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179,
-        181, 191, 193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277,
-        281, 283, 293, 307, 311, 313, 317, 331, 337, 347, 349,
-    ]
-    .map(BigUint::from);
+    let low_level_primes: [BigUint; 70] = LOW_LEVEL_PRIMES.map(BigUint::from);
     random_number = rng.gen_biguint(n);
     random_number.set_bit(n - 1, true);
     while low_level_primes.iter().any(|divisor| {
@@ -58,7 +52,7 @@ fn create_low_level_prime(n: u64) -> BigUint {
     random_number
 }
 
-fn miller_rabin_test(candidate: &BigUint) -> bool {
+pub fn miller_rabin_test(candidate: &BigUint) -> bool {
     let mut rng = thread_rng();
     const NUMBER_OF_TRIALS: i32 = 20;
     let mut max_divisions_by_two: u32 = 0;
@@ -71,8 +65,12 @@ fn miller_rabin_test(candidate: &BigUint) -> bool {
         2u32.pow(max_divisions_by_two) * &even_component,
         candidate - 1u32
     );
-    !((0..NUMBER_OF_TRIALS)
-        .map(|_| rng.gen_biguint_range(&(BigUint::one() + BigUint::one()), &(candidate + 1u32)))
+    !(LOW_LEVEL_PRIMES
+        .map(BigUint::from)
+        .into_iter()
+        .chain((0..NUMBER_OF_TRIALS).map(|_| {
+            rng.gen_biguint_range(&(BigUint::one() + BigUint::one()), &(candidate + 1u32))
+        }))
         .any(|round_tester| {
             is_composite(
                 &round_tester,
@@ -88,10 +86,12 @@ fn is_composite(
     candidate: &BigUint,
     max_divisions_by_two: &u32,
 ) -> bool {
+    dbg!(&candidate);
     if round_tester.modpow(even_component, candidate) == BigUint::one() {
         false
     } else {
         !((0..*max_divisions_by_two).any(|i| {
+            dbg!((&round_tester, i));
             round_tester.modpow(&(even_component * (1u32 << i)), candidate) == candidate - 1u32
         }))
     }
@@ -119,3 +119,10 @@ fn RSA_test() {
     let decrypted_message = use_RSA_key(&encrypted_message, &private_key, &modulo);
     assert_eq!(String::from_utf8(decrypted_message).unwrap(), msg);
 }
+
+const LOW_LEVEL_PRIMES: [u32; 70] = [
+    2u32, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
+    97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191,
+    193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293,
+    307, 311, 313, 317, 331, 337, 347, 349,
+];

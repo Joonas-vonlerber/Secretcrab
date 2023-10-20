@@ -216,7 +216,7 @@ pub fn sha_256(input: &[u8]) -> [u8; 32] {
 }
 
 //just so much unneccecary boilerplate
-pub fn sha_224(input: &[u8]) -> [u8; 28] {
+pub fn sha_244(input: &[u8]) -> [u8; 28] {
     let (mut h0, mut h1, mut h2, mut h3, mut h4, mut h5, mut h6, mut h7) = (
         0xc1059ed8u32,
         0x367cd507,
