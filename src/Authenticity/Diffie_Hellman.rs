@@ -1,2 +1,2 @@
-// Todo: diffie hellman key exchange
+// TODO: diffie Hellmann key exchange
 // Maybe also Elliptic curve diffie hellman

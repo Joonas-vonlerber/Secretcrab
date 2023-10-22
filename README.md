@@ -22,7 +22,7 @@ The random number generator used in generating keys might not be totally secure.
 
 I am planning on implementing
 
-- EdDSA
+- EdDSA (currently working on this one. Should be done this year (2023)?? Doubt :DD)
 - Diffie-Heilman
 - Argon2
 

@@ -863,7 +863,7 @@ pub fn sha_3_244(input: &[u8]) -> [u8; 28] {
 }
 
 pub fn sha_3_256(input: &[u8]) -> [u8; 32] {
-    keccak::<32>(input, 316, 0x06)
+    keccak::<32>(input, 136, 0x06)
 }
 
 pub fn sha_3_384(input: &[u8]) -> [u8; 48] {
@@ -978,4 +978,31 @@ fn sha_3_224_test() {
         hello_hash_224,
         "4cf679344af02c2b89e4a902f939f4608bcac0fbf81511da13d7d9b9".to_owned()
     );
+}
+
+#[test]
+fn sha_3_256_test() {
+    let hello_hash_256 = sha_3_256(b"Hello").to_hex();
+    assert_eq!(
+        hello_hash_256,
+        "8ca66ee6b2fe4bb928a8e3cd2f508de4119c0895f22e011117e22cf9b13de7ef"
+    )
+}
+
+#[test]
+fn sha_3_384_test() {
+    let hello_hash_384 = sha_3_384(b"Hello").to_hex();
+    assert_eq!(
+        hello_hash_384,
+        "df7e26e3d067579481501057c43aea61035c8ffdf12d9ae427ef4038ad7c13266a11c0a3896adef37ad1bc85a2b5bdac"
+    )
+}
+
+#[test]
+fn sha_3_512_test() {
+    let hello_hash_512 = sha_3_512(b"Hello").to_hex();
+    assert_eq!(
+        hello_hash_512,
+        "0b8a44ac991e2b263e8623cfbeefc1cffe8c1c0de57b3e2bf1673b4f35e660e89abd18afb7ac93cf215eba36dd1af67698d6c9ca3fdaaf734ffc4bd5a8e34627"
+    )
 }

@@ -12,3 +12,7 @@ pub mod Confidentiality {
     pub mod RSA;
     pub mod XOR;
 }
+
+pub mod Authenticity {
+    pub mod EdDSA;
+}
