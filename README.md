@@ -5,7 +5,7 @@ Also includes encryption algorithms like RSA or AES.
 
 ## Implementation security
 
-I cannot verify the security of the implentations :DD For secure purposes i recommend using the official implenetations whenever possible.
+I cannot verify the security of the implementations :DD For secure purposes i recommend using the official implenetations whenever possible.
 
 The random number generator used in generating keys might not be totally secure.
 
@@ -26,6 +26,6 @@ I am planning on implementing
 - Diffie-Heilman
 - Argon2
 
-I am also studying so new updates and implentations might take a while
+I am doing this on the side of my studying so new updates and implementations might take a while
 
 Pull requests open :D

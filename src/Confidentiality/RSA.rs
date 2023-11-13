@@ -86,12 +86,10 @@ fn is_composite(
     candidate: &BigUint,
     max_divisions_by_two: &u32,
 ) -> bool {
-    dbg!(&candidate);
     if round_tester.modpow(even_component, candidate) == BigUint::one() {
         false
     } else {
         !((0..*max_divisions_by_two).any(|i| {
-            dbg!((&round_tester, i));
             round_tester.modpow(&(even_component * (1u32 << i)), candidate) == candidate - 1u32
         }))
     }

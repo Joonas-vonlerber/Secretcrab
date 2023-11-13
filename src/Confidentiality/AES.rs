@@ -1,6 +1,5 @@
 use ndarray::prelude::*;
 use rand::{thread_rng, Rng};
-use rustc_serialize::hex::ToHex;
 type AESState = Array2<u8>;
 
 #[derive(Debug, PartialEq)]
