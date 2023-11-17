@@ -4,7 +4,7 @@ use crypto_bigint::{
 };
 
 use crate::Integrity::SHA::sha_512;
-use const_hex::const_decode_to_array;
+use const_hex::{const_decode_to_array, encode};
 use rand::prelude::*;
 
 const fn ct_eq(lhs_res: &GF25519, rhs_res: &GF25519) -> bool {
@@ -26,32 +26,6 @@ const fn ct_eq(lhs_res: &GF25519, rhs_res: &GF25519) -> bool {
 const fn ct_gt(lhs: &U256, rhs: &U256) -> bool {
     let (_res, borrow) = rhs.sbb(lhs, Limb::ZERO);
     borrow.0 == u64::MAX
-}
-
-const fn decode_hex_byte(bytes: [u8; 2]) -> (u8, u16) {
-    let hi = decode_nibble(bytes[0]);
-    let lo = decode_nibble(bytes[1]);
-    let byte = (hi << 4) | lo;
-    let err = byte >> 8;
-    let result = byte as u8;
-    (result, err)
-}
-
-const fn decode_nibble(src: u8) -> u16 {
-    let byte = src as i16;
-    let mut ret: i16 = -1;
-
-    // 0-9  0x30-0x39
-    // if (byte > 0x2f && byte < 0x3a) ret += byte - 0x30 + 1; // -47
-    ret += (((0x2fi16 - byte) & (byte - 0x3a)) >> 8) & (byte - 47);
-    // A-F  0x41-0x46
-    // if (byte > 0x40 && byte < 0x47) ret += byte - 0x41 + 10 + 1; // -54
-    ret += (((0x40i16 - byte) & (byte - 0x47)) >> 8) & (byte - 54);
-    // a-f  0x61-0x66
-    // if (byte > 0x60 && byte < 0x67) ret += byte - 0x61 + 10 + 1; // -86
-    ret += (((0x60i16 - byte) & (byte - 0x67)) >> 8) & (byte - 86);
-
-    ret as u16
 }
 
 impl_modulus!(
@@ -151,7 +125,7 @@ fn is_quadratic_residue(candidate: &GF25519) -> bool {
     legrende == U256::ONE
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 /// Point on the curve Ed25519 represented in extended twisted edwards coordinates e.g four coordinates X,Y,T,Z, where for an affine point (x,y)
 /// X = x/Z, Y = y/Z, T = x*y/Z  
 struct Ed25519 {
@@ -386,10 +360,12 @@ impl Ed25519 {
 
     #[inline]
     /// Montgomery ladder multiplication for curve points
-    fn mul<const ULIMBS: usize>(&self, s: Uint<ULIMBS>) -> Ed25519 {
+    const fn mul<const ULIMBS: usize>(&self, s: Uint<ULIMBS>) -> Ed25519 {
         let mut r0 = Ed25519::NEUTRAL;
-        let mut r1 = self.to_owned();
-        for i in (0..(ULIMBS * 64)).rev() {
+        let mut r1 = *self;
+        let mut i = 64 * ULIMBS - 1;
+        let mut is_zero: bool = false;
+        while i > 0 || is_zero {
             if s.bit_vartime(i) {
                 r0 = r0.add(&r1);
                 r1 = r1.double();
@@ -397,11 +373,25 @@ impl Ed25519 {
                 r1 = r0.add(&r1);
                 r0 = r0.double();
             }
+
+            if i == 1 {
+                is_zero = true;
+                i = 0;
+            } else if is_zero {
+                is_zero = false;
+            } else {
+                i -= 1;
+            }
         }
         r0 // r0 = P * s
     }
 }
 
+impl PartialEq for Ed25519 {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_affine() == other.as_affine()
+    }
+}
 /// Generate a private key for Ed25519
 #[inline]
 pub fn generate_private_key() -> [u8; 32] {
@@ -450,8 +440,9 @@ pub fn Ed25519_sign_gen_pub_key(message: &[u8], private_key: [u8; 32]) -> ([u8; 
     let prefix: Vec<u8> = private_hash.into_iter().skip(32).collect();
     let r: U256 = le_int_from_byte_mod_order(sha_512(&[&prefix, message].concat()));
     let R: [u8; 32] = base.mul(r).to_byte_array();
-    let k: U256 = le_int_from_byte_mod_order(sha_512(&[R, public_key].concat()));
+    let k: U256 = le_int_from_byte_mod_order(sha_512(&[&R, &public_key, message].concat()));
     let S = le_int_from_byte_mod_order((k.mul(&s)).to_le_bytes()).add_mod(&r, &Ed25519::ORDER);
+
     (
         [R, S.to_le_bytes()].concat().try_into().unwrap(),
         public_key,
@@ -475,42 +466,45 @@ pub fn Ed25519_sign_with_keys(
     let prefix: Vec<u8> = private_hash.into_iter().skip(32).collect();
     let r: U256 = le_int_from_byte_mod_order(sha_512(&[&prefix, message].concat()));
     let R: [u8; 32] = base.mul(r).to_byte_array();
-    let k: U256 = le_int_from_byte_mod_order(sha_512(&[R, public_key].concat()));
+    let k: U256 = le_int_from_byte_mod_order(sha_512(&[&R, &public_key, message].concat()));
     let S = le_int_from_byte_mod_order((k.mul(&s)).to_le_bytes()).add_mod(&r, &Ed25519::ORDER);
     [R, S.to_le_bytes()].concat().try_into().unwrap()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VerificationError {
+    BadSignature,
+    BadPublicKey,
+    SignatureNotMatchMessage,
+}
+
 pub fn Ed25519_verify_sign(
     message: &[u8],
-    signatue: [u8; 64],
+    signature: [u8; 64],
     public_key: [u8; 32],
-) -> Option<bool> {
-    let R: Ed25519 = Ed25519::from_byte_array(
-        signatue
-            .iter()
-            .take(32)
-            .map(|a| a.to_owned())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(),
-    )?;
-    let S = U256::from_le_bytes(
-        signatue
-            .into_iter()
-            .skip(32)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(),
-    );
+) -> Result<(), VerificationError> {
+    let (r_bytes, s_bytes) = signature.split_at(32);
+    let R: Ed25519 = match Ed25519::from_byte_array(r_bytes.try_into().unwrap()) {
+        // Will always be [u8; 32]
+        Some(a) => a,
+        None => return Err(VerificationError::BadSignature),
+    };
+    let S: U256 = U256::from_le_bytes(s_bytes.try_into().unwrap()); // Will always be [u8; 32]
 
-    let A = Ed25519::from_byte_array(public_key)?;
+    let A = match Ed25519::from_byte_array(public_key) {
+        Some(a) => a,
+        None => return Err(VerificationError::BadPublicKey),
+    };
 
     let k = U512::from_le_bytes(sha_512(
         &[&R.to_byte_array(), &A.to_byte_array(), message].concat(),
     ));
-    let base = Ed25519::BASE;
 
-    Some(base.mul(S) == R.add(&A.mul(k)))
+    let base = Ed25519::BASE;
+    match base.mul(S) == R.add(&A.mul(k)) {
+        true => Ok(()),
+        false => Err(VerificationError::SignatureNotMatchMessage),
+    }
 }
 
 /*
@@ -578,7 +572,7 @@ fn ed25519_multiplication_test() {
     let base: Ed25519 = Ed25519::BASE;
     let neutral: Ed25519 = Ed25519::NEUTRAL;
 
-    assert_eq!(neutral.double().as_affine(), neutral.as_affine());
+    assert_eq!(neutral.double(), neutral);
 
     let base2 = base.mul(U256::from_u8(2));
     let base_double = base.double();
@@ -644,5 +638,44 @@ fn Ed25519_test() {
 
     assert_eq!(public_key1, expected_pub_key1);
     assert_eq!(signature1, expected_sign1);
-    assert!(Ed25519_verify_sign(message1, signature1, public_key1).unwrap())
+    assert_eq!(
+        Ed25519_verify_sign(message1, signature1, public_key1),
+        Ok(())
+    );
+
+    let private_key2: [u8; 32] =
+        const_decode_to_array(b"4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb")
+            .unwrap();
+    let expected_pub_key2: [u8; 32] =
+        const_decode_to_array(b"3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c")
+            .unwrap();
+
+    let message2 = b"r";
+    let expected_sign2: [u8; 64] = const_decode_to_array(
+        b"92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00",
+    )
+    .unwrap();
+    let (signature2, public_key2) = Ed25519_sign_gen_pub_key(message2, private_key2);
+    assert_eq!(public_key2, expected_pub_key2);
+    assert_eq!(signature2, expected_sign2);
+    assert_eq!(
+        Ed25519_verify_sign(message2, signature2, public_key2),
+        Ok(())
+    );
+
+    let private_key3: [u8; 32] =
+        const_decode_to_array(b"c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7")
+            .unwrap();
+    let expected_pub_key3: [u8; 32] =
+        const_decode_to_array(b"fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025")
+            .unwrap();
+    let expected_sign3: [u8; 64] = const_decode_to_array(b"6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a").unwrap();
+    let message3: [u8; 2] = [0xaf, 0x82];
+    let (signature3, public_key3) = Ed25519_sign_gen_pub_key(&message3, private_key3);
+    assert_eq!(expected_pub_key3, public_key3);
+    assert_eq!(expected_sign3, signature3);
+    assert_eq!(
+        Ed25519_verify_sign(&message3, signature3, public_key3),
+        Ok(())
+    );
 }
