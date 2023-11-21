@@ -4,7 +4,7 @@ use crypto_bigint::{
 };
 
 use crate::Integrity::SHA::sha_512;
-use const_hex::{const_decode_to_array, encode};
+use const_hex::const_decode_to_array;
 use rand::prelude::*;
 
 const fn ct_eq(lhs_res: &GF25519, rhs_res: &GF25519) -> bool {
@@ -401,22 +401,6 @@ pub fn generate_private_key() -> [u8; 32] {
     key
 }
 
-/// Generate ic and private_keys for Ed25519 signing protocol
-///
-/// ## Returns
-///
-/// (public key, private key) as byte arrays
-fn generate_Ed25519_keys() -> ([u8; 32], [u8; 32]) {
-    let private_key = generate_private_key();
-    let mut hashed: Vec<u8> = sha_512(&private_key).into_iter().take(32).collect();
-    hashed[0] &= 0b11111000;
-    hashed[31] &= 0b01111111;
-    hashed[31] |= 0b01000000;
-    let s: U256 = U256::from_le_bytes(hashed.try_into().unwrap());
-    let base = Ed25519::BASE;
-    let public_key: [u8; 32] = base.mul(s).to_byte_array();
-    (public_key, private_key)
-}
 /// Auxillary function for signing and verifying when converting between U512 and U256
 fn le_int_from_byte_mod_order(input: [u8; 64]) -> U256 {
     U512::from_le_bytes(input)
@@ -425,6 +409,7 @@ fn le_int_from_byte_mod_order(input: [u8; 64]) -> U256 {
         .1
 }
 
+/// Sign a message using the Ed25519 digital signature algorithm and generate a public key with the given private key.
 pub fn Ed25519_sign_gen_pub_key(message: &[u8], private_key: [u8; 32]) -> ([u8; 64], [u8; 32]) {
     // Generate keys
     let private_hash = sha_512(&private_key);
@@ -519,163 +504,174 @@ pub fn Ed25519_verify_sign(
 
 
 */
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn sqrt_test() {
+        let qr1: GF25519 = residue!(4);
+        let expected_roots: [Option<(GF25519, GF25519)>; 2] = [
+            Some((residue!(2), residue!(2).neg())),
+            Some((residue!(2).neg(), residue!(2))),
+        ];
+        assert!(expected_roots.contains(&sqrt(&qr1)));
 
-#[test]
-fn sqrt_test() {
-    let qr1: GF25519 = residue!(4);
-    let expected_roots: [Option<(GF25519, GF25519)>; 2] = [
-        Some((residue!(2), residue!(2).neg())),
-        Some((residue!(2).neg(), residue!(2))),
-    ];
-    assert!(expected_roots.contains(&sqrt(&qr1)));
+        let qr2: GF25519 = residue!(9);
+        let expected_roots: [Option<(GF25519, GF25519)>; 2] = [
+            Some((residue!(3), residue!(3).neg())),
+            Some((residue!(3).neg(), residue!(3))),
+        ];
+        assert!(expected_roots.contains(&sqrt(&qr2)));
 
-    let qr2: GF25519 = residue!(9);
-    let expected_roots: [Option<(GF25519, GF25519)>; 2] = [
-        Some((residue!(3), residue!(3).neg())),
-        Some((residue!(3).neg(), residue!(3))),
-    ];
-    assert!(expected_roots.contains(&sqrt(&qr2)));
+        let qr3: GF25519 = residue!(16);
+        let expected_roots: [Option<(GF25519, GF25519)>; 2] = [
+            Some((residue!(4), residue!(4).neg())),
+            Some((residue!(4).neg(), residue!(4))),
+        ];
+        assert!(expected_roots.contains(&sqrt(&qr3)));
 
-    let qr3: GF25519 = residue!(16);
-    let expected_roots: [Option<(GF25519, GF25519)>; 2] = [
-        Some((residue!(4), residue!(4).neg())),
-        Some((residue!(4).neg(), residue!(4))),
-    ];
-    assert!(expected_roots.contains(&sqrt(&qr3)));
+        let qr4: GF25519 = residue!(13);
 
-    let qr4: GF25519 = residue!(13);
+        assert_eq!(sqrt(&qr4), None);
+    }
 
-    assert_eq!(sqrt(&qr4), None);
-}
+    #[test]
+    fn ed25519_base_point_test() {
+        std::env::set_var("RUST_BACKTRACE", "1");
+        let base = Ed25519::BASE;
+        let expected_x =
+            U256::from_be_hex("216936D3CD6E53FEC0A4E231FDD6DC5C692CC7609525A7B2C9562D608F25D51A");
+        let expected_y =
+            U256::from_be_hex("6666666666666666666666666666666666666666666666666666666666666658");
 
-#[test]
-fn ed25519_base_point_test() {
-    std::env::set_var("RUST_BACKTRACE", "1");
-    let base = Ed25519::BASE;
-    let expected_x =
-        U256::from_be_hex("216936D3CD6E53FEC0A4E231FDD6DC5C692CC7609525A7B2C9562D608F25D51A");
-    let expected_y =
-        U256::from_be_hex("6666666666666666666666666666666666666666666666666666666666666658");
+        let hex_point =
+            Ed25519::from_hex("5866666666666666666666666666666666666666666666666666666666666666")
+                .unwrap();
 
-    let hex_point =
-        Ed25519::from_hex("5866666666666666666666666666666666666666666666666666666666666666")
-            .unwrap();
+        assert_eq!(base.x.retrieve(), expected_x);
+        assert_eq!(base.y.retrieve(), expected_y);
+        assert_eq!(hex_point, base);
+        assert_eq!(base, Ed25519::from_hex(&base.to_hex()).unwrap());
+    }
 
-    assert_eq!(base.x.retrieve(), expected_x);
-    assert_eq!(base.y.retrieve(), expected_y);
-    assert_eq!(hex_point, base);
-    assert_eq!(base, Ed25519::from_hex(&base.to_hex()).unwrap());
-}
+    #[test]
+    fn ed25519_multiplication_test() {
+        let base: Ed25519 = Ed25519::BASE;
+        let neutral: Ed25519 = Ed25519::NEUTRAL;
 
-#[test]
-fn ed25519_multiplication_test() {
-    let base: Ed25519 = Ed25519::BASE;
-    let neutral: Ed25519 = Ed25519::NEUTRAL;
+        assert_eq!(neutral.double(), neutral);
 
-    assert_eq!(neutral.double(), neutral);
+        let base2 = base.mul(U256::from_u8(2));
+        let base_double = base.double();
+        assert_eq!(base2.as_affine(), base_double.as_affine());
+        assert_eq!(base2.as_affine(), base.add(&base).as_affine());
+        let expected2_x =
+            U256::from_be_hex("36AB384C9F5A046C3D043B7D1833E7AC080D8E4515D7A45F83C5A14E2843CE0E");
+        let expected2_y =
+            U256::from_be_hex("2260CDF3092329C21DA25EE8C9A21F5697390F51643851560E5F46AE6AF8A3C9");
+        assert_eq!(base2.as_affine().0.retrieve(), expected2_x);
+        assert_eq!(base2.as_affine().1.retrieve(), expected2_y);
 
-    let base2 = base.mul(U256::from_u8(2));
-    let base_double = base.double();
-    assert_eq!(base2.as_affine(), base_double.as_affine());
-    assert_eq!(base2.as_affine(), base.add(&base).as_affine());
-    let expected2_x =
-        U256::from_be_hex("36AB384C9F5A046C3D043B7D1833E7AC080D8E4515D7A45F83C5A14E2843CE0E");
-    let expected2_y =
-        U256::from_be_hex("2260CDF3092329C21DA25EE8C9A21F5697390F51643851560E5F46AE6AF8A3C9");
-    assert_eq!(base2.as_affine().0.retrieve(), expected2_x);
-    assert_eq!(base2.as_affine().1.retrieve(), expected2_y);
+        let base3 = base.mul(U256::from_u8(3));
+        let expected3_x =
+            U256::from_be_hex("67ae9c4a22928f491ff4ae743edac83a6343981981624886ac62485fd3f8e25c");
+        let expected3_y =
+            U256::from_be_hex("1267b1d177ee69aba126a18e60269ef79f16ec176724030402c3684878f5b4d4");
 
-    let base3 = base.mul(U256::from_u8(3));
-    let expected3_x =
-        U256::from_be_hex("67ae9c4a22928f491ff4ae743edac83a6343981981624886ac62485fd3f8e25c");
-    let expected3_y =
-        U256::from_be_hex("1267b1d177ee69aba126a18e60269ef79f16ec176724030402c3684878f5b4d4");
+        assert_eq!(base3.as_affine().0.retrieve(), expected3_x);
+        assert_eq!(base3.as_affine().1.retrieve(), expected3_y);
 
-    assert_eq!(base3.as_affine().0.retrieve(), expected3_x);
-    assert_eq!(base3.as_affine().1.retrieve(), expected3_y);
+        let base5 = base.mul(U256::from_u8(5));
+        let expected5_x =
+            U256::from_be_hex("49FDA73EADE3587BFCEF7CF7D12DA5DE5C2819F93E1BE1A591409CC0322EF233");
+        let expected5_y =
+            U256::from_be_hex("5F4825B298FEAE6FE02C6E148992466631282ECA89430B5D10D21F83D676C8ED");
+        assert_eq!(base5.as_affine().0.retrieve(), expected5_x);
+        assert_eq!(base5.as_affine().1.retrieve(), expected5_y);
 
-    let base5 = base.mul(U256::from_u8(5));
-    let expected5_x =
-        U256::from_be_hex("49FDA73EADE3587BFCEF7CF7D12DA5DE5C2819F93E1BE1A591409CC0322EF233");
-    let expected5_y =
-        U256::from_be_hex("5F4825B298FEAE6FE02C6E148992466631282ECA89430B5D10D21F83D676C8ED");
-    assert_eq!(base5.as_affine().0.retrieve(), expected5_x);
-    assert_eq!(base5.as_affine().1.retrieve(), expected5_y);
+        let a =
+            U256::from_le_hex("12581e70a192aeb9ac1411b36d11fc06393db55998190491c063807a6b4d730d");
+        let basea = base.mul(a);
+        let expecteda_x =
+            U256::from_be_hex("67CEBF8191EECC2A58EA37EB2BC3242685BCDED15E5A510389B769E7BB8020C3");
+        let expecteda_y =
+            U256::from_be_hex("608105B6F38F15A032D1B2B1C090A3F3A687185BA5A3E41097E56D930952E314");
+        assert_eq!(basea.as_affine().0.retrieve(), expecteda_x);
+        assert_eq!(basea.as_affine().1.retrieve(), expecteda_y);
 
-    let a = U256::from_le_hex("12581e70a192aeb9ac1411b36d11fc06393db55998190491c063807a6b4d730d");
-    let basea = base.mul(a);
-    let expecteda_x =
-        U256::from_be_hex("67CEBF8191EECC2A58EA37EB2BC3242685BCDED15E5A510389B769E7BB8020C3");
-    let expecteda_y =
-        U256::from_be_hex("608105B6F38F15A032D1B2B1C090A3F3A687185BA5A3E41097E56D930952E314");
-    assert_eq!(basea.as_affine().0.retrieve(), expecteda_x);
-    assert_eq!(basea.as_affine().1.retrieve(), expecteda_y);
+        let b =
+            U256::from_le_hex("0c2340b974bebfb9cb3f14e991bca432b57fb33f7c4d79e15f64209076afcd00");
+        let baseb = base.mul(b);
+        let expectedb_x =
+            U256::from_be_hex("6A5C71962B9904C8DAC0CC1040FDFC0674C6F46E27A2B199DBC90A1171FF37EA");
+        let expectedb_y =
+            U256::from_be_hex("1D3F41A4374F8151F27B19F7C995EB7FD37292758BAD347805B95E5D57CCA4CC");
+        assert_eq!(baseb.as_affine().0.retrieve(), expectedb_x);
+        assert_eq!(baseb.as_affine().1.retrieve(), expectedb_y);
+    }
 
-    let b = U256::from_le_hex("0c2340b974bebfb9cb3f14e991bca432b57fb33f7c4d79e15f64209076afcd00");
-    let baseb = base.mul(b);
-    let expectedb_x =
-        U256::from_be_hex("6A5C71962B9904C8DAC0CC1040FDFC0674C6F46E27A2B199DBC90A1171FF37EA");
-    let expectedb_y =
-        U256::from_be_hex("1D3F41A4374F8151F27B19F7C995EB7FD37292758BAD347805B95E5D57CCA4CC");
-    assert_eq!(baseb.as_affine().0.retrieve(), expectedb_x);
-    assert_eq!(baseb.as_affine().1.retrieve(), expectedb_y);
-}
+    #[test]
+    fn Ed25519_test() {
+        let private_key1: [u8; 32] = const_decode_to_array(
+            b"9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+        )
+        .unwrap();
 
-#[test]
-fn Ed25519_test() {
-    let private_key1: [u8; 32] =
-        const_decode_to_array(b"9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
-            .unwrap();
+        let expected_pub_key1: [u8; 32] = const_decode_to_array(
+            b"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        )
+        .unwrap();
 
-    let expected_pub_key1: [u8; 32] =
-        const_decode_to_array(b"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
-            .unwrap();
+        let message1 = b"";
+        let (signature1, public_key1) = Ed25519_sign_gen_pub_key(message1, private_key1);
 
-    let message1 = b"";
-    let (signature1, public_key1) = Ed25519_sign_gen_pub_key(message1, private_key1);
+        let expected_sign1: [u8; 64] = const_decode_to_array(b"e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b").unwrap();
 
-    let expected_sign1: [u8; 64] = const_decode_to_array(b"e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b").unwrap();
+        assert_eq!(public_key1, expected_pub_key1);
+        assert_eq!(signature1, expected_sign1);
+        assert_eq!(
+            Ed25519_verify_sign(message1, signature1, public_key1),
+            Ok(())
+        );
 
-    assert_eq!(public_key1, expected_pub_key1);
-    assert_eq!(signature1, expected_sign1);
-    assert_eq!(
-        Ed25519_verify_sign(message1, signature1, public_key1),
-        Ok(())
-    );
+        let private_key2: [u8; 32] = const_decode_to_array(
+            b"4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+        )
+        .unwrap();
+        let expected_pub_key2: [u8; 32] = const_decode_to_array(
+            b"3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+        )
+        .unwrap();
 
-    let private_key2: [u8; 32] =
-        const_decode_to_array(b"4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb")
-            .unwrap();
-    let expected_pub_key2: [u8; 32] =
-        const_decode_to_array(b"3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c")
-            .unwrap();
-
-    let message2 = b"r";
-    let expected_sign2: [u8; 64] = const_decode_to_array(
+        let message2 = b"r";
+        let expected_sign2: [u8; 64] = const_decode_to_array(
         b"92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00",
     )
     .unwrap();
-    let (signature2, public_key2) = Ed25519_sign_gen_pub_key(message2, private_key2);
-    assert_eq!(public_key2, expected_pub_key2);
-    assert_eq!(signature2, expected_sign2);
-    assert_eq!(
-        Ed25519_verify_sign(message2, signature2, public_key2),
-        Ok(())
-    );
+        let (signature2, public_key2) = Ed25519_sign_gen_pub_key(message2, private_key2);
+        assert_eq!(public_key2, expected_pub_key2);
+        assert_eq!(signature2, expected_sign2);
+        assert_eq!(
+            Ed25519_verify_sign(message2, signature2, public_key2),
+            Ok(())
+        );
 
-    let private_key3: [u8; 32] =
-        const_decode_to_array(b"c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7")
-            .unwrap();
-    let expected_pub_key3: [u8; 32] =
-        const_decode_to_array(b"fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025")
-            .unwrap();
-    let expected_sign3: [u8; 64] = const_decode_to_array(b"6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a").unwrap();
-    let message3: [u8; 2] = [0xaf, 0x82];
-    let (signature3, public_key3) = Ed25519_sign_gen_pub_key(&message3, private_key3);
-    assert_eq!(expected_pub_key3, public_key3);
-    assert_eq!(expected_sign3, signature3);
-    assert_eq!(
-        Ed25519_verify_sign(&message3, signature3, public_key3),
-        Ok(())
-    );
+        let private_key3: [u8; 32] = const_decode_to_array(
+            b"c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7",
+        )
+        .unwrap();
+        let expected_pub_key3: [u8; 32] = const_decode_to_array(
+            b"fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+        )
+        .unwrap();
+        let expected_sign3: [u8; 64] = const_decode_to_array(b"6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a").unwrap();
+        let message3: [u8; 2] = [0xaf, 0x82];
+        let (signature3, public_key3) = Ed25519_sign_gen_pub_key(&message3, private_key3);
+        assert_eq!(expected_pub_key3, public_key3);
+        assert_eq!(expected_sign3, signature3);
+        assert_eq!(
+            Ed25519_verify_sign(&message3, signature3, public_key3),
+            Ok(())
+        );
+    }
 }

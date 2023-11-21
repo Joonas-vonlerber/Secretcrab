@@ -1,4 +1,4 @@
-use crate::Integrity::Keccak::*;
+use crate::Integrity::Sponge::Keccak::*;
 #[derive(Debug, PartialEq)]
 enum BlockSize {
     Bits512,
@@ -893,27 +893,22 @@ pub fn shake_256<const OUTPUT_LEN: usize>(input: &[u8]) -> [u8; OUTPUT_LEN] {
 #[cfg(test)]
 mod SHA_tests {
     use super::*;
-    extern crate rustc_serialize as rustc_ser;
-    use rustc_ser::hex::ToHex;
+    use const_hex::encode;
     use std::env;
     #[test]
     fn sha1_test() {
         env::set_var("RUST_BACKTRACE", "1");
-        let lol_hash = sha_1(b"lol").as_slice().to_hex();
+        let lol_hash = encode(sha_1(b"lol"));
         assert_eq!(
             lol_hash,
             "403926033d001b5279df37cbbe5287b7c7c267fa".to_owned()
         );
-        let lazy_dog = sha_1(b"The quick brown fox jumps over the lazy dog")
-            .as_slice()
-            .to_hex();
+        let lazy_dog = encode(sha_1(b"The quick brown fox jumps over the lazy dog").as_slice());
         assert_eq!(
             lazy_dog,
             "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12".to_owned()
         );
-        let lazy_cog = sha_1(b"The quick brown fox jumps over the lazy cog")
-            .as_slice()
-            .to_hex();
+        let lazy_cog = encode(sha_1(b"The quick brown fox jumps over the lazy cog").as_slice());
         assert_eq!(
             lazy_cog,
             "de9f2c7fd25e1b3afad3e85a0bd17d9b100db4b3".to_owned()
@@ -921,21 +916,17 @@ mod SHA_tests {
     }
     #[test]
     fn sha_256_test() {
-        let Hello_hash = sha_256(b"Hello").as_slice().to_hex();
+        let Hello_hash = encode(sha_256(b"Hello").as_slice());
         assert_eq!(
             Hello_hash,
             "185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969".to_owned()
         );
-        let lazy_dog = sha_256(b"The quick brown fox jumps over the lazy dog")
-            .as_slice()
-            .to_hex();
+        let lazy_dog = encode(sha_256(b"The quick brown fox jumps over the lazy dog").as_slice());
         assert_eq!(
             lazy_dog,
             "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592".to_owned()
         );
-        let lazy_cog = sha_256(b"The quick brown fox jumps over the lazy cog")
-            .as_slice()
-            .to_hex();
+        let lazy_cog = encode(sha_256(b"The quick brown fox jumps over the lazy cog").as_slice());
         assert_eq!(
             lazy_cog,
             "e4c4d8f3bf76b692de791a173e05321150f7a345b46484fe427f6acc7ecc81be".to_owned()
@@ -943,18 +934,14 @@ mod SHA_tests {
     }
     #[test]
     fn sha_512_test() {
-        let hello_hash = sha_512(b"Hello").as_slice().to_hex();
+        let hello_hash = encode(sha_512(b"Hello").as_slice());
         assert_eq!(hello_hash, "3615f80c9d293ed7402687f94b22d58e529b8cc7916f8fac7fddf7fbd5af4cf777d3d795a7a00a16bf7e7f3fb9561ee9baae480da9fe7a18769e71886b03f315".to_owned());
-        let lazy_dog = sha_512(b"The quick brown fox jumps over the lazy dog")
-            .as_slice()
-            .to_hex();
+        let lazy_dog = encode(sha_512(b"The quick brown fox jumps over the lazy dog").as_slice());
         assert_eq!(
             lazy_dog,
             "07e547d9586f6a73f73fbac0435ed76951218fb7d0c8d788a309d785436bbb642e93a252a954f23912547d1e8a3b5ed6e1bfd7097821233fa0538f3db854fee6".to_owned()
         );
-        let lazy_cog = sha_512(b"The quick brown fox jumps over the lazy cog")
-            .as_slice()
-            .to_hex();
+        let lazy_cog = encode(sha_512(b"The quick brown fox jumps over the lazy cog").as_slice());
         assert_eq!(
             lazy_cog,
             "3eeee1d0e11733ef152a6c29503b3ae20c4f1f3cda4cb26f1bc1a41f91c7fe4ab3bd86494049e201c4bd5155f31ecb7a3c8606843c4cc8dfcab7da11c8ae5045".to_owned()
@@ -962,12 +949,12 @@ mod SHA_tests {
     }
     #[test]
     fn sha_512_to_t_test() {
-        let hello_hash_244 = sha_512_to_244(b"Hello").as_slice().to_hex();
+        let hello_hash_244 = encode(sha_512_to_244(b"Hello").as_slice());
         assert_eq!(
             hello_hash_244,
             "0d075258abfd1f8b81fc0a5207a1aa5cc82eb287720b1f849b862235".to_owned()
         );
-        let hello_hash_256 = sha_512_to_256(b"Hello").as_slice().to_hex();
+        let hello_hash_256 = encode(sha_512_to_256(b"Hello").as_slice());
         assert_eq!(
             hello_hash_256,
             "7e75b18b88d2cb8be95b05ec611e54e2460408a2dcf858f945686446c9d07aac".to_owned()
@@ -976,7 +963,7 @@ mod SHA_tests {
 
     #[test]
     fn sha_3_224_test() {
-        let hello_hash_224 = sha_3_244(b"Hello").to_hex();
+        let hello_hash_224 = encode(sha_3_244(b"Hello"));
         assert_eq!(
             hello_hash_224,
             "4cf679344af02c2b89e4a902f939f4608bcac0fbf81511da13d7d9b9".to_owned()
@@ -985,7 +972,7 @@ mod SHA_tests {
 
     #[test]
     fn sha_3_256_test() {
-        let hello_hash_256 = sha_3_256(b"Hello").to_hex();
+        let hello_hash_256 = encode(sha_3_256(b"Hello"));
         assert_eq!(
             hello_hash_256,
             "8ca66ee6b2fe4bb928a8e3cd2f508de4119c0895f22e011117e22cf9b13de7ef"
@@ -994,7 +981,7 @@ mod SHA_tests {
 
     #[test]
     fn sha_3_384_test() {
-        let hello_hash_384 = sha_3_384(b"Hello").to_hex();
+        let hello_hash_384 = encode(sha_3_384(b"Hello"));
         assert_eq!(
         hello_hash_384,
         "df7e26e3d067579481501057c43aea61035c8ffdf12d9ae427ef4038ad7c13266a11c0a3896adef37ad1bc85a2b5bdac"
@@ -1003,7 +990,7 @@ mod SHA_tests {
 
     #[test]
     fn sha_3_512_test() {
-        let hello_hash_512 = sha_3_512(b"Hello").to_hex();
+        let hello_hash_512 = encode(sha_3_512(b"Hello"));
         assert_eq!(
         hello_hash_512,
         "0b8a44ac991e2b263e8623cfbeefc1cffe8c1c0de57b3e2bf1673b4f35e660e89abd18afb7ac93cf215eba36dd1af67698d6c9ca3fdaaf734ffc4bd5a8e34627"

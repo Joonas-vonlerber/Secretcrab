@@ -1,5 +1,5 @@
 use num::{bigint::RandBigInt, BigInt, BigUint, Integer, One, Zero};
-use rand::prelude::*;
+use rand::rngs::OsRng;
 #[derive(Debug, PartialEq)]
 pub struct RSAkeypair {
     pub public_key: Vec<u8>,
@@ -38,7 +38,7 @@ pub fn generate_RSA_keys_modulo(bits: u64) -> RSAkeypair {
 }
 
 fn create_low_level_prime(n: u64) -> BigUint {
-    let mut rng = thread_rng();
+    let mut rng = OsRng;
     let mut random_number: BigUint;
     let low_level_primes: [BigUint; 70] = LOW_LEVEL_PRIMES.map(BigUint::from);
     random_number = rng.gen_biguint(n);
@@ -53,7 +53,7 @@ fn create_low_level_prime(n: u64) -> BigUint {
 }
 
 pub fn miller_rabin_test(candidate: &BigUint) -> bool {
-    let mut rng = thread_rng();
+    let mut rng = OsRng;
     const NUMBER_OF_TRIALS: i32 = 20;
     let mut max_divisions_by_two: u32 = 0;
     let mut even_component: BigUint = candidate - 1u32;

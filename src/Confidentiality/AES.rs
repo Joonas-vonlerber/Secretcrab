@@ -1,5 +1,5 @@
 use ndarray::prelude::*;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 type AESState = Array2<u8>;
 
 #[derive(Debug, PartialEq)]
@@ -237,7 +237,7 @@ fn bytes_to_block(input: &[u8]) -> Vec<AESState> {
 /// Generate a random AES key with the specified size
 /// Should be cryptografically secure by using the rand crate.
 pub fn generate_aes_key(key_size: &AESKeySize) -> Vec<u32> {
-    let mut rng = thread_rng();
+    let mut rng = rand::rngs::OsRng;
     let mut key: [u32; 8] = [0; 8];
     rng.fill(&mut key);
     let mut output = key.to_vec();
