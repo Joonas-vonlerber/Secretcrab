@@ -24,6 +24,7 @@ The random number generator used in generating keys might not be totally secure.
 
 I am planning on implementing
 
+- Photon
 - Argon2
 - Diffie-Heilman
 

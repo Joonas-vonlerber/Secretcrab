@@ -1,5 +1,5 @@
 #![allow(dead_code, non_snake_case)]
-#![feature(slice_as_chunks, iter_collect_into, const_result, const_option)]
+#![feature(array_chunks, array_zip, const_option)]
 
 pub mod Integrity {
     pub mod BLAKE;

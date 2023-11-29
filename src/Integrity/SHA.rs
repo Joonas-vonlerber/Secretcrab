@@ -589,15 +589,13 @@ fn sha_512_IV_generating_function(input: &[u8]) -> [u8; 64] {
 }
 
 pub fn sha_512_to_244(input: &[u8]) -> [u8; 28] {
-    let [mut h0, mut h1, mut h2, mut h3, mut h4, mut h5, mut h6, mut h7]: [u64; 8] = unsafe {
+    let [mut h0, mut h1, mut h2, mut h3, mut h4, mut h5, mut h6, mut h7]: [u64; 8] =
         sha_512_IV_generating_function(b"SHA-512/224")
-            .as_chunks_unchecked::<8>()
-            .iter()
+            .array_chunks::<8>()
             .map(|x| u64::from_be_bytes(*x))
             .collect::<Vec<u64>>()
             .try_into()
-            .unwrap()
-    }; // SAFETY: 64 is divisible by 8
+            .unwrap();
     let mut a: u64;
     let mut b: u64;
     let mut c: u64;
@@ -677,15 +675,13 @@ pub fn sha_512_to_244(input: &[u8]) -> [u8; 28] {
 }
 
 pub fn sha_512_to_256(input: &[u8]) -> [u8; 32] {
-    let [mut h0, mut h1, mut h2, mut h3, mut h4, mut h5, mut h6, mut h7]: [u64; 8] = unsafe {
+    let [mut h0, mut h1, mut h2, mut h3, mut h4, mut h5, mut h6, mut h7]: [u64; 8] =
         sha_512_IV_generating_function(b"SHA-512/256")
-            .as_chunks_unchecked::<8>()
-            .iter()
+            .array_chunks::<8>()
             .map(|x| u64::from_be_bytes(*x))
             .collect::<Vec<u64>>()
             .try_into()
-            .unwrap()
-    }; // SAFETY: 64 is divisible by 8
+            .unwrap();
     let mut a: u64;
     let mut b: u64;
     let mut c: u64;

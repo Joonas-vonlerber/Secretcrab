@@ -8,7 +8,9 @@ pub fn keccak<const OUTPUT_LEN: usize>(
     rate: usize,
     delimited_suffix: u8,
 ) -> [u8; OUTPUT_LEN] {
-    sponge::<_, _, OUTPUT_LEN, 200>(keccak_f_1600, keccak_padding, rate, input, delimited_suffix)
+    let pad_fun =
+        |pad_input: &[u8], pad_rate: usize| keccak_padding(pad_input, pad_rate, delimited_suffix);
+    sponge::<_, _, OUTPUT_LEN, 200>(keccak_f_1600, pad_fun, rate, input)
 }
 
 const ROUND_CONSTANTS: [u64; 24] = [
@@ -38,7 +40,7 @@ const ROUND_CONSTANTS: [u64; 24] = [
     0x8000000080008008,
 ];
 
-fn keccak_f_1600(state: &mut Vec<u8>) {
+fn keccak_f_1600(state: &mut [u8; 200]) {
     let mut array: Array2<u64> = Array2::from_shape_vec(
         (5, 5).f(),
         state
@@ -54,7 +56,9 @@ fn keccak_f_1600(state: &mut Vec<u8>) {
         .into_raw_vec()
         .iter()
         .flat_map(|word| word.to_le_bytes())
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
 }
 
 fn round_1600(state: &mut Array2<u64>, round_constant: u64) {
@@ -346,9 +350,13 @@ mod tests {
     }
     #[test]
     fn keccak_f_1600_test() {
-        let mut test_array: Vec<u8> = (0..25u64).flat_map(|word| word.to_le_bytes()).collect();
+        let mut test_array: [u8; 200] = (0..25u64)
+            .flat_map(|word| word.to_le_bytes())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
         keccak_f_1600(&mut test_array);
-        let should_array: Vec<u8> = vec![
+        let should_array: [u8; 200] = [
             21, 129, 237, 82, 82, 176, 116, 131, 0, 148, 86, 182, 118, 166, 247, 29, 125, 121, 81,
             138, 75, 25, 101, 247, 69, 5, 118, 209, 67, 123, 71, 32, 106, 96, 246, 243, 164, 139,
             95, 209, 147, 212, 141, 124, 79, 20, 215, 161, 63, 253, 56, 81, 150, 147, 209, 48, 190,
