@@ -27,7 +27,7 @@ impl AESKeySize {
     }
 }
 
-fn sub_byte(byte: u8) -> u8 {
+pub(crate) fn sub_byte(byte: u8) -> u8 {
     AES_S_BOX[byte as usize]
 }
 

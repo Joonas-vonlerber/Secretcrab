@@ -1,6 +1,65 @@
-pub mod Keccak;
+use std::fmt::Debug;
 
-pub(crate) fn sponge<F1, F2, const OUTPUT_LEN: usize, const STATE_SIZE: usize>(
+pub mod Keccak;
+mod Photon;
+
+fn zip_with<const N: usize, T, U, V: Debug, F: Fn(T, U) -> V>(
+    arr1: [T; N],
+    arr2: [U; N],
+    f: F,
+) -> [V; N] {
+    arr1.into_iter()
+        .zip(arr2)
+        .map(|(a, b)| f(a, b))
+        .collect::<Vec<V>>()
+        .try_into()
+        .unwrap()
+}
+
+fn extended_sponge<F1, F2, const OUTPUT_LEN: usize, const STATE_SIZE: usize>(
+    perm_fun: F1,
+    pad_fun: F2,
+    absorb_rate: usize,
+    squeeze_rate: usize,
+    initialization_state: [u8; STATE_SIZE],
+    input: &[u8],
+) -> [u8; OUTPUT_LEN]
+where
+    F1: Fn(&mut [u8; STATE_SIZE]),
+    F2: Fn(&[u8], usize) -> Vec<u8>,
+{
+    let padded_message: Vec<u8> = pad_fun(input, absorb_rate);
+    assert_eq!(padded_message.len() % absorb_rate, 0);
+
+    let zero_block: Vec<u8> = [0x00].repeat(STATE_SIZE - absorb_rate);
+    let mut state: [u8; STATE_SIZE] = initialization_state;
+
+    // Absorbion phase
+    for P in padded_message.chunks(absorb_rate) {
+        let block: [u8; STATE_SIZE] = [P, &zero_block]
+            .concat()
+            .try_into()
+            .expect("Padding function did not pad correctly");
+        state = zip_with(state, block, |a, b| a ^ b);
+        perm_fun(&mut state);
+    }
+
+    // Squeeze phase
+    if squeeze_rate >= OUTPUT_LEN {
+        return state[0..OUTPUT_LEN].try_into().unwrap();
+    };
+
+    let mut output: Vec<u8> = Vec::new();
+    output.extend(&state[0..squeeze_rate]);
+
+    while output.len() < OUTPUT_LEN {
+        perm_fun(&mut state);
+        output.extend(&state[0..squeeze_rate])
+    }
+    output[0..OUTPUT_LEN].try_into().unwrap()
+}
+
+fn sponge<F1, F2, const OUTPUT_LEN: usize, const STATE_SIZE: usize>(
     perm_fun: F1,
     pad_fun: F2,
     rate: usize,
@@ -10,34 +69,14 @@ where
     F1: Fn(&mut [u8; STATE_SIZE]),
     F2: Fn(&[u8], usize) -> Vec<u8>,
 {
-    let padded_message: Vec<u8> = pad_fun(input, rate);
-    assert_eq!(padded_message.len() % rate, 0);
-
-    let zero_block: Vec<u8> = [0x00].repeat(STATE_SIZE - rate);
-    let mut state: [u8; STATE_SIZE] = [0x00; STATE_SIZE];
-
-    // Absorbion phase
-    for P in padded_message.chunks(rate) {
-        let block: [u8; STATE_SIZE] = [P, &zero_block]
-            .concat()
-            .try_into()
-            .expect("Padding function did not pad correctly");
-        state = state.zip(block).map(|(x, y)| x ^ y);
-        perm_fun(&mut state);
-    }
-    // Squeeze phase
-    if rate >= OUTPUT_LEN {
-        return state[0..OUTPUT_LEN].try_into().unwrap();
-    };
-
-    let mut output: Vec<u8> = Vec::new();
-    output.extend(&state[0..rate]);
-
-    while output.len() < OUTPUT_LEN {
-        perm_fun(&mut state);
-        output.extend(&state[0..rate])
-    }
-    output[0..OUTPUT_LEN].try_into().unwrap()
+    extended_sponge::<_, _, OUTPUT_LEN, STATE_SIZE>(
+        perm_fun,
+        pad_fun,
+        rate,
+        rate,
+        [0x00; STATE_SIZE],
+        input,
+    )
 }
 
 struct Duplex<F1, F2, const STATE_SIZE: usize>
@@ -69,16 +108,13 @@ where
         assert!(OUTPUT_LEN <= self.rate);
         // Pad message and make it into one block
         let padded = (self.padding_function)(input, self.rate);
-        let block = [padded, [0x00].repeat(STATE_SIZE - self.rate)].concat();
+        let block: [u8; STATE_SIZE] = [padded, [0x00].repeat(STATE_SIZE - self.rate)]
+            .concat()
+            .try_into()
+            .expect("Padding function did not pad correctly");
         // Zip it with the state
-        self.state = self
-            .state
-            .zip(
-                block
-                    .try_into()
-                    .expect("Padding function did not pad correctly"),
-            )
-            .map(|(x, y)| x ^ y);
+
+        self.state = zip_with(self.state, block, |a, b| a ^ b);
         // Permutate the state
         (self.permutation_function)(&mut self.state);
         // First OUTPUT_LEN bytes
@@ -201,10 +237,6 @@ where
 //         };
 //         (input_blocks, input_len, last_input_block.to_vec())
 //     }
-// }
-
-// fn xor_array<const N: usize>(array1: [u8; N], array2: [u8; N]) -> [u8; N] {
-//     array1.zip(array2).map(|(a, b)| a ^ b)
 // }
 
 // fn concat_with(slice: &[u8], byte: u8) -> Vec<u8> {

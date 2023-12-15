@@ -5,9 +5,9 @@ Also includes encryption algorithms like RSA or AES.
 
 ## Implementation security
 
-I cannot verify the security of the implementations :DD For secure purposes i recommend using the official implenetations whenever possible.
+I cannot verify the security of my own implementations. For secure purposes I recommend using trusted implementations whenever possible.
 
-The random number generator used in generating keys might not be totally secure.
+The random number generator used in generating keys might not be totally secure. Check [implementation](https://docs.rs/rand/0.8.5/rand/rngs/struct.OsRng.html)
 
 ## Features
 
@@ -17,7 +17,7 @@ The random number generator used in generating keys might not be totally secure.
 - SHA1
 - SHA224, SHA256, SHA384, SHA512, SHA512/244, SHA512/256
 - SHA3-224, SHA3-256, SHA3-384, SHA3-512, SHAKE-128, SHAKE-256
-- Ed25519
+- Ed25519 signing & verifying
 - BLAKE2B, BLAKE2S, BLAKE2-224, BLAKE2-256, BLAKE2-384, BLAKE2-512
 
 ## Future

@@ -1,5 +1,5 @@
 #![allow(dead_code, non_snake_case)]
-#![feature(array_chunks, array_zip, const_option)]
+#![feature(array_chunks, const_option)]
 
 pub mod Integrity {
     pub mod BLAKE;
