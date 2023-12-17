@@ -11,3 +11,4 @@ num = {version = "0.4.1", features = ["rand"]}
 ndarray = "0.15.6"
 crypto-bigint = "0.5.3"
 const-hex = "1.10.0"
+num-traits = "0.2.17"

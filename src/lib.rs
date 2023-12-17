@@ -1,4 +1,4 @@
-#![allow(dead_code, non_snake_case)]
+#![allow(dead_code, non_snake_case, clippy::suspicious_arithmetic_impl)]
 #![feature(array_chunks, const_option)]
 
 pub mod Integrity {

@@ -1,8 +1,11 @@
-use ndarray::{Array1, Array2, ArrayView1, ArrayViewMut1};
-use std::{default, fmt::Display, ops::*};
+use ndarray::{Array, Array2, ArrayViewMut1, AssignElem, LinalgScalar};
+use num_traits::{One, Zero};
+use std::ops::*;
 
 use crate::Confidentiality::AES::sub_byte;
 use PhotonConstants::*;
+
+use super::extended_sponge;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 enum PhotonCell {
@@ -10,228 +13,201 @@ enum PhotonCell {
     U8(u8),
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default)]
-struct U4(u8);
+impl PhotonCell {
+    fn zero(&self) -> Self {
+        match self {
+            PhotonCell::U4(_) => PhotonCell::U4(0),
+            PhotonCell::U8(_) => PhotonCell::U8(0),
+        }
+    }
 
-impl Display for U4 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_hex())
+    fn one(&self) -> Self {
+        match self {
+            PhotonCell::U4(_) => PhotonCell::U4(1),
+            PhotonCell::U8(_) => PhotonCell::U8(1),
+        }
+    }
+
+    fn value(&self) -> u8 {
+        match self {
+            PhotonCell::U4(a) => *a,
+            PhotonCell::U8(a) => *a,
+        }
+    }
+
+    fn modulo(&self) -> u8 {
+        match self {
+            PhotonCell::U4(_) => 0b0011,
+            PhotonCell::U8(_) => 0x1b,
+        }
+    }
+
+    fn bits(&self) -> usize {
+        match self {
+            PhotonCell::U4(_) => 4,
+            PhotonCell::U8(_) => 8,
+        }
+    }
+
+    fn inv(self) -> Option<Self> {
+        let mut t: u8 = 0;
+        let mut r: u8 = self.modulo();
+        let mut newt: u8 = 1;
+        let mut newr: u8 = self.value();
+        let mut quotient: u8;
+        while newr != 0 {
+            (quotient, _) = poly_rem_euclid(r, newr);
+            (r, newr) = (
+                newr,
+                r ^ (mul_char_2(quotient, newr, self.bits(), self.modulo())),
+            );
+            (t, newt) = (
+                newt,
+                t ^ (mul_char_2(quotient, newt, self.bits(), self.modulo())),
+            )
+        }
+        if poly_deg(r) > 0 {
+            return None;
+        }
+        let result = match self {
+            PhotonCell::U4(_) => PhotonCell::U4(t),
+            PhotonCell::U8(_) => PhotonCell::U8(t),
+        };
+
+        assert_eq!(self * result, self.one());
+        Some(result)
     }
 }
 
-impl U4 {
-    const MAX: U4 = U4(15);
-    const MIN: U4 = U4(0);
-
-    #[inline]
-    const fn new(input: u8) -> Option<U4> {
-        if U4::MAX.0 >= input {
-            Some(U4(input))
-        } else {
-            None
+impl BitXor for PhotonCell {
+    type Output = PhotonCell;
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (PhotonCell::U4(a), PhotonCell::U4(b)) => PhotonCell::U4(a ^ b),
+            (PhotonCell::U8(a), PhotonCell::U8(b)) => PhotonCell::U8(a ^ b),
+            (PhotonCell::U4(a), PhotonCell::U8(b)) => PhotonCell::U8(a ^ b),
+            (PhotonCell::U8(a), PhotonCell::U4(b)) => PhotonCell::U8(a ^ b),
         }
-    }
-
-    fn to_hex(self) -> String {
-        String::from(match self.0 {
-            0 => "0x0",
-            1 => "0x1",
-            2 => "0x2",
-            3 => "0x3",
-            4 => "0x4",
-            5 => "0x5",
-            6 => "0x6",
-            7 => "0x7",
-            8 => "0x8",
-            9 => "0x9",
-            10 => "0xa",
-            11 => "0xb",
-            12 => "0xc",
-            13 => "0xd",
-            14 => "0xe",
-            15 => "0xf",
-            _ => unreachable!(),
-        })
-    }
-    #[inline]
-    const fn wrapping_add(self, rhs: U4) -> U4 {
-        U4(self.0.wrapping_add(rhs.0) & 0x0f)
-    }
-    #[inline]
-    const fn saturating_add(self, rhs: U4) -> U4 {
-        let result: u8 = self.0.saturating_add(rhs.0);
-        if result > U4::MAX.0 {
-            U4::MAX
-        } else {
-            U4(result)
-        }
-    }
-    #[inline]
-    const fn wrapping_mul(self, rhs: U4) -> U4 {
-        U4(self.0.wrapping_mul(rhs.0) & 0x0f)
-    }
-    #[inline]
-    const fn saturating_mul(self, rhs: U4) -> U4 {
-        let result: u8 = self.0.saturating_mul(rhs.0);
-        if result > U4::MAX.0 {
-            U4::MAX
-        } else {
-            U4(result)
-        }
-    }
-    #[inline]
-    const fn wrapping_and(self, rhs: U4) -> U4 {
-        U4(self.0 & rhs.0)
-    }
-    #[inline]
-    const fn wrapping_not(self) -> U4 {
-        U4((!self.0) & 0x0f)
-    }
-    #[inline]
-    const fn wrapping_xor(self, rhs: U4) -> U4 {
-        U4(self.0 ^ rhs.0)
-    }
-    #[inline]
-    const fn wrapping_or(self, rhs: U4) -> U4 {
-        U4(self.0 | rhs.0)
-    }
-    #[inline]
-    const fn wrapping_shl(self, times: u8) -> U4 {
-        U4((self.0 << times) & 0x0f)
-    }
-    #[inline]
-    const fn wrapping_shr(self, times: u8) -> U4 {
-        U4(self.0 >> times)
-    }
-    #[inline]
-    fn add_photon(self, rhs: U4) -> U4 {
-        self ^ rhs
-    }
-    #[inline]
-    fn mul_photon(self, rhs: U4) -> U4 {
-        let mut a: U4 = self;
-        let mut b: U4 = rhs;
-        let mut p: U4 = U4::MIN;
-        let mut carry: bool;
-        for _ in 0..4 {
-            if b.0 & 1 == 1 {
-                p ^= a
-            }
-            b >>= 1;
-            carry = a.0 >> 3 == 1;
-            a <<= 1;
-            if carry {
-                a ^= U4(0b0011)
-            }
-        }
-        p
     }
 }
 
-fn aes_mul_photon(lhs: u8, rhs: u8) -> u8 {
+impl BitXorAssign for PhotonCell {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        *self = *self ^ rhs
+    }
+}
+
+impl Shl<u8> for PhotonCell {
+    type Output = PhotonCell;
+    fn shl(self, rhs: u8) -> Self::Output {
+        match self {
+            PhotonCell::U4(a) => PhotonCell::U4((a << rhs) & 0xf),
+            PhotonCell::U8(a) => PhotonCell::U8(a << rhs),
+        }
+    }
+}
+
+fn poly_deg(p: u8) -> i8 {
+    7i8 - (p.leading_zeros() as i8)
+}
+
+fn poly_rem_euclid(lhs: u8, rhs: u8) -> (u8, u8) {
+    assert_ne!(rhs, 0, "Cannot divide by 0");
+    let mut q: u8 = 0;
+    let mut r: u8 = lhs;
+    while poly_deg(r) >= poly_deg(rhs) {
+        let pos = u8::try_from(poly_deg(r) - poly_deg(rhs)).expect("deg difference was negative");
+        q += 1 << pos;
+        r ^= rhs << pos;
+    }
+    assert_eq!(lhs, q * rhs + r);
+    (q, r)
+}
+
+fn mul_char_2(lhs: u8, rhs: u8, bits: usize, modulo: u8) -> u8 {
     let mut a: u8 = lhs;
     let mut b: u8 = rhs;
     let mut p: u8 = 0;
     let mut carry: bool;
-    for _ in 0..8 {
+    for _ in 0..bits {
         if b & 1 == 1 {
             p ^= a
         }
         b >>= 1;
-        carry = a >> 7 == 1;
-        a <<= 1;
+        carry = a >> bits == 1;
+        a = (a << 1) & ((1 << bits) - 1);
         if carry {
-            a ^= 0x1b
+            a ^= modulo
         }
     }
     p
 }
 
-impl Add<U4> for U4 {
-    type Output = U4;
-    fn add(self, rhs: U4) -> Self::Output {
-        U4::new(self.0 + rhs.0).expect("Attempted addition with overflow (U4)")
+impl Add for PhotonCell {
+    type Output = PhotonCell;
+    fn add(self, rhs: Self) -> Self::Output {
+        self ^ rhs
     }
 }
 
-impl Mul<U4> for U4 {
-    type Output = U4;
-    fn mul(self, rhs: U4) -> Self::Output {
-        U4::new(self.0 * rhs.0).expect("Attempted multiplication with overflow (U4)")
+impl AddAssign for PhotonCell {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs
     }
 }
 
-impl BitAnd<U4> for U4 {
-    type Output = U4;
-    fn bitand(self, rhs: U4) -> Self::Output {
-        self.wrapping_and(rhs)
+impl Mul for PhotonCell {
+    type Output = PhotonCell;
+    fn mul(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (PhotonCell::U4(a), PhotonCell::U4(b)) => PhotonCell::U4(mul_char_2(a, b, 4, 0b0011)),
+            (PhotonCell::U8(a), PhotonCell::U8(b)) => PhotonCell::U8(mul_char_2(a, b, 8, 0x1b)),
+            (PhotonCell::U4(a), PhotonCell::U8(b)) => PhotonCell::U8(mul_char_2(a, b, 8, 0x1b)),
+            (PhotonCell::U8(a), PhotonCell::U4(b)) => PhotonCell::U8(mul_char_2(a, b, 8, 0x1b)),
+        }
     }
 }
 
-impl BitAndAssign for U4 {
-    fn bitand_assign(&mut self, rhs: Self) {
-        *self = self.wrapping_and(rhs)
+impl Sub for PhotonCell {
+    type Output = PhotonCell;
+    fn sub(self, rhs: Self) -> Self::Output {
+        self + rhs
     }
 }
 
-impl BitXor<U4> for U4 {
-    type Output = U4;
-    fn bitxor(self, rhs: U4) -> Self::Output {
-        self.wrapping_xor(rhs)
+impl Div for PhotonCell {
+    type Output = PhotonCell;
+    fn div(self, rhs: Self) -> Self::Output {
+        self * (rhs.inv().expect("Division by 0"))
     }
 }
 
-impl BitXorAssign for U4 {
-    fn bitxor_assign(&mut self, rhs: Self) {
-        *self = self.wrapping_xor(rhs)
+impl Zero for PhotonCell {
+    fn zero() -> Self {
+        Self::U4(0)
+    }
+    fn is_zero(&self) -> bool {
+        self.value() == 0
     }
 }
 
-impl Shl<u8> for U4 {
-    type Output = U4;
-    fn shl(self, rhs: u8) -> Self::Output {
-        self.wrapping_shl(rhs)
+impl One for PhotonCell {
+    fn one() -> Self {
+        Self::U4(1)
     }
 }
 
-impl ShlAssign<u8> for U4 {
-    fn shl_assign(&mut self, rhs: u8) {
-        *self = self.wrapping_shl(rhs)
-    }
-}
+//0b1101).mul_photon(U4(0b1010)), U4(0b1011)
 
-impl Shr<u8> for U4 {
-    type Output = U4;
-    fn shr(self, rhs: u8) -> Self::Output {
-        self.wrapping_shr(rhs)
-    }
-}
-
-impl ShrAssign<u8> for U4 {
-    fn shr_assign(&mut self, rhs: u8) {
-        *self = self.wrapping_shr(rhs)
-    }
-}
-
-fn sub_u4(input: U4) -> U4 {
-    PRESET_SBOX[input.0 as usize]
-}
-
-fn add_constant_u4(state: &mut Array2<U4>, round: usize, block_size: PhotonBlockSize) {
-    let internal_constants: &[U4] = block_size.internal_constants_u4();
+fn add_constant(state: &mut Array2<PhotonCell>, round: usize, block_size: PhotonBlockSize) {
+    let internal_constants: &[PhotonCell] = block_size.internal_constants();
     state
         .column_mut(0)
-        .map_inplace(|a| *a = *a ^ ROUND_CONSTANTS[round] ^ internal_constants[a.0 as usize])
+        .map_inplace(|a| *a = *a ^ ROUND_CONSTANTS[round] ^ internal_constants[a.value() as usize])
 }
 
-fn add_constant_u8(state: &mut Array2<u8>, round: usize) {
-    state
-        .column_mut(0)
-        .map_inplace(|a| *a = *a ^ ROUND_CONSTANTS[round].0 ^ INTERNAL_CONSTANTS_288[*a as usize])
-}
-
-fn bytearray_rotate_left<T: Copy>(
-    mut array: ArrayViewMut1<T>,
+fn bytearray_rotate_left(
+    mut array: ArrayViewMut1<PhotonCell>,
     mid: usize,
     block_size: PhotonBlockSize,
 ) {
@@ -247,17 +223,139 @@ fn bytearray_rotate_left<T: Copy>(
     }
 }
 
-fn shift_rows<T: Copy>(state: &mut Array2<T>, block_size: PhotonBlockSize) {
+fn shift_rows(state: &mut Array2<PhotonCell>, block_size: PhotonBlockSize) {
     for (rot, row) in state.rows_mut().into_iter().enumerate() {
         bytearray_rotate_left(row, rot, block_size);
     }
 }
 
-fn sub_cells_u4(state: &mut Array2<U4>) {
-    state.map_inplace(|a| *a = sub_u4(*a))
+#[inline]
+fn sub_cell(cell: PhotonCell) -> PhotonCell {
+    match cell {
+        PhotonCell::U4(a) => PRESET_SBOX[a as usize],
+        PhotonCell::U8(a) => PhotonCell::U8(sub_byte(a)),
+    }
 }
-fn sub_cells_u8(state: &mut Array2<u8>) {
-    state.map_inplace(|a| *a = sub_byte(*a))
+
+fn sub_cells(state: &mut Array2<PhotonCell>) {
+    state.map_inplace(|a| *a = sub_cell(*a))
+}
+
+fn mix_columns_serial(state: &mut Array2<PhotonCell>, block_size: PhotonBlockSize) {
+    let matrix: Array2<PhotonCell> = block_size.mixing_matrix();
+    for mut column in state.columns_mut() {
+        let mixed = matrix.dot(&column);
+        column.assign(&mixed);
+    }
+}
+
+fn u8_to_photoncell(value: u8, block_size: PhotonBlockSize) -> Vec<PhotonCell> {
+    match block_size {
+        PhotonBlockSize::P288 => vec![PhotonCell::U8(value)],
+        _ => vec![PhotonCell::U4(value >> 4), PhotonCell::U4(value & 0xf)],
+    }
+}
+
+fn photoncell_to_u8(values: (PhotonCell, PhotonCell), block_size: PhotonBlockSize) -> Vec<u8> {
+    match block_size {
+        PhotonBlockSize::P288 => vec![values.0.value(), values.1.value()],
+        _ => vec![(values.0.value() << 4) + (values.1.value())],
+    }
+}
+
+fn state_to_array<const STATE_SIZE: usize>(
+    state: &[u8; STATE_SIZE],
+    block_size: PhotonBlockSize,
+) -> Array2<PhotonCell> {
+    let shape = (block_size.array_size(), block_size.array_size());
+    let cellstate: Vec<PhotonCell> = state
+        .iter()
+        .flat_map(|a| u8_to_photoncell(*a, block_size))
+        .collect();
+    Array2::from_shape_vec(shape, cellstate)
+        .expect("state_size and block_size do not work with eachother")
+}
+
+fn array_to_state<const STATE_SIZE: usize>(
+    array: Array2<PhotonCell>,
+    block_size: PhotonBlockSize,
+) -> [u8; STATE_SIZE] {
+    let cellstate = array.into_raw_vec();
+    let state_vec: Vec<u8> = cellstate
+        .chunks_exact(2)
+        .flat_map(|xs| photoncell_to_u8((xs[0], xs[1]), block_size))
+        .collect();
+    state_vec
+        .try_into()
+        .expect("The array had an odd amount of elements. Implementing either P100 or P196")
+}
+
+fn photon_perm<const STATE_SIZE: usize>(state: &mut [u8; STATE_SIZE], block_size: PhotonBlockSize) {
+    let mut array: Array2<PhotonCell> = state_to_array(&*state, block_size);
+    for round in 0..12 {
+        add_constant(&mut array, round, block_size);
+        sub_cells(&mut array);
+        shift_rows(&mut array, block_size);
+        mix_columns_serial(&mut array, block_size);
+    }
+    *state = array_to_state(array, block_size);
+}
+
+fn photon_pad(input: &[u8], rate: usize) -> Vec<u8> {
+    let padding_needed = rate - (input.len() % rate);
+    let padding_bytes: Vec<u8> = match padding_needed {
+        0 => [[0x80].to_vec(), [0x00].repeat(rate - 1)].concat(),
+        1 => vec![0x80],
+        x => [[0x80].to_vec(), [0x00].repeat(x - 1)].concat(),
+    };
+    [input, padding_bytes.as_slice()].concat()
+}
+
+fn photon_P144<const STATE_SIZE: usize>(state: &mut [u8; STATE_SIZE]) {
+    photon_perm(state, PhotonBlockSize::P144)
+}
+fn photon_P256<const STATE_SIZE: usize>(state: &mut [u8; STATE_SIZE]) {
+    photon_perm(state, PhotonBlockSize::P256)
+}
+fn photon_P288<const STATE_SIZE: usize>(state: &mut [u8; STATE_SIZE]) {
+    photon_perm(state, PhotonBlockSize::P288)
+}
+
+fn photon<const HASH_LEN: usize, const STATE_SIZE: usize, F: Fn(&mut [u8; STATE_SIZE])>(
+    input: &[u8],
+    perm_fun: F,
+    absorb_rate: u8,
+    squeeze_rate: u8,
+) -> [u8; HASH_LEN] {
+    let initialization_state: [u8; STATE_SIZE] = [
+        &[0x00].repeat(STATE_SIZE - 3)[..],
+        &[(HASH_LEN / 4) as u8][..],
+        &[absorb_rate][..],
+        &[squeeze_rate][..],
+    ]
+    .concat()
+    .try_into()
+    .expect("The initialization rate should be the correct length");
+    extended_sponge::<_, _, HASH_LEN, STATE_SIZE>(
+        perm_fun,
+        photon_pad,
+        absorb_rate.into(),
+        squeeze_rate.into(),
+        initialization_state,
+        input,
+    )
+}
+
+fn photon128(input: &[u8]) -> [u8; 16] {
+    photon::<16, 18, _>(input, photon_P144, 2, 2)
+}
+
+fn photon224(input: &[u8]) -> [u8; 28] {
+    photon::<28, 32, _>(input, photon_P256, 4, 4)
+}
+
+fn photon256(input: &[u8]) -> [u8; 32] {
+    photon::<32, 36, _>(input, photon_P288, 4, 4)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -279,19 +377,17 @@ impl PhotonBlockSize {
             PhotonBlockSize::P288 => 6,
         }
     }
-    fn internal_constants_u4(&self) -> &'static [U4] {
+    fn internal_constants(&self) -> &'static [PhotonCell] {
         match self {
             PhotonBlockSize::P100 => &INTERNAL_CONSTANTS_100[..],
             PhotonBlockSize::P144 => &INTERNAL_CONSTANTS_144[..],
             PhotonBlockSize::P196 => &INTERNAL_CONSTANTS_196[..],
             PhotonBlockSize::P256 => &INTERNAL_CONSTANTS_256[..],
-            PhotonBlockSize::P288 => {
-                unimplemented!("P288 uses u8 instead of U4, use internal_constants_u8 instead")
-            }
+            PhotonBlockSize::P288 => &INTERNAL_CONSTANTS_288[..],
         }
     }
 
-    fn mixing_matrix_u4(&self) -> Array2<U4> {
+    fn mixing_matrix(&self) -> Array2<PhotonCell> {
         // Fuck do i have to do this :((
         let array_size: (usize, usize) = (self.array_size(), self.array_size());
         match *self {
@@ -303,66 +399,48 @@ impl PhotonBlockSize {
                 .expect("Mixing_array_196 was not the right size"),
             PhotonBlockSize::P256 => Array2::from_shape_vec(array_size, MIXING_ARRAY_256.to_vec())
                 .expect("Mixing_array_256 was not the right size"),
-            PhotonBlockSize::P288 => {
-                unimplemented!("P288 uses matrix of u8 instead of U4. Use mixing_matrix_u8 instead")
-            }
-        }
-    }
-
-    fn mixing_matrix_u8(&self) -> Array2<u8> {
-        let array_size: (usize, usize) = (self.array_size(), self.array_size());
-        match *self {
             PhotonBlockSize::P288 => Array2::from_shape_vec(array_size, MIXING_ARRAY_288.to_vec())
                 .expect("Mixing_array_288 was not the right size"),
-            _ => unimplemented!(
-                "P100, P144, P196 and P256 use U4 instead of u8. Use mixing_matrix_u4"
-            ),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     #[test]
-    fn U4_constructor_test() {
-        assert_eq!(U4::new(0), Some(U4(0)));
-        assert_eq!(U4::new(16), None);
-        assert_eq!(U4::new(15), Some(U4(15)));
-        assert_eq!(U4::new(u8::MAX), None);
-    }
-    #[test]
-    fn U4_arith_test() {
-        //sum
-        assert_eq!(U4(1) + U4(6), U4(7));
-        assert_eq!(U4(6) + U4(9), U4::MAX);
-        assert_eq!(U4::MAX.wrapping_add(U4(1)), U4::MIN);
-        assert_eq!(U4::MAX.saturating_add(U4(12)), U4::MAX);
-
-        //times
-        assert_eq!(U4(1) * U4(4), U4(4));
-        assert_eq!(U4(3) * U4(5), U4::MAX);
-        assert_eq!(U4(12).wrapping_mul(U4(4)), U4(0));
-        assert_eq!(U4(12).saturating_mul(U4(4)), U4::MAX);
-
-        // sum mod x^4 + x + 1
-        assert_eq!(U4(2).add_photon(U4(4)), U4(6));
-        assert_eq!(U4(12).add_photon(U4(10)), U4(6));
-
-        // mul mod x^4 + x + 1
-        assert_eq!(U4(0b1101).mul_photon(U4(0b1010)), U4(0b1011));
-    }
-
-    #[test]
     fn shift_rows_test() {
-        let mut test_array: Array2<u8> =
-            Array2::from_shape_vec((5, 5), (0u8..25).collect()).unwrap();
-        let resulting_array: Array2<u8> = Array2::from_shape_vec(
+        let mut test_array: Array2<PhotonCell> =
+            Array2::from_shape_vec((5, 5), (0u8..25).map(PhotonCell::U8).collect()).unwrap();
+
+        let resulting_array: Array2<PhotonCell> = Array2::from_shape_vec(
             (5, 5),
             vec![
-                0, 1, 2, 3, 4, 6, 7, 8, 9, 5, 12, 13, 14, 10, 11, 18, 19, 15, 16, 17, 24, 20, 21,
-                22, 23,
+                PhotonCell::U8(0),
+                PhotonCell::U8(1),
+                PhotonCell::U8(2),
+                PhotonCell::U8(3),
+                PhotonCell::U8(4),
+                PhotonCell::U8(6),
+                PhotonCell::U8(7),
+                PhotonCell::U8(8),
+                PhotonCell::U8(9),
+                PhotonCell::U8(5),
+                PhotonCell::U8(12),
+                PhotonCell::U8(13),
+                PhotonCell::U8(14),
+                PhotonCell::U8(10),
+                PhotonCell::U8(11),
+                PhotonCell::U8(18),
+                PhotonCell::U8(19),
+                PhotonCell::U8(15),
+                PhotonCell::U8(16),
+                PhotonCell::U8(17),
+                PhotonCell::U8(24),
+                PhotonCell::U8(20),
+                PhotonCell::U8(21),
+                PhotonCell::U8(22),
+                PhotonCell::U8(23),
             ],
         )
         .unwrap();
@@ -373,242 +451,311 @@ mod tests {
 
 mod PhotonConstants {
     use super::*;
-    pub(super) const PRESET_SBOX: [U4; 16] = [
-        U4(0xc),
-        U4(0x5),
-        U4(0x6),
-        U4(0xb),
-        U4(0x9),
-        U4(0x0),
-        U4(0xa),
-        U4(0xd),
-        U4(0x3),
-        U4(0xe),
-        U4(0xf),
-        U4(0x8),
-        U4(0x4),
-        U4(0x7),
-        U4(0x1),
-        U4(0x2),
+    pub(super) const PRESET_SBOX: [PhotonCell; 16] = [
+        PhotonCell::U4(0xc),
+        PhotonCell::U4(0x5),
+        PhotonCell::U4(0x6),
+        PhotonCell::U4(0xb),
+        PhotonCell::U4(0x9),
+        PhotonCell::U4(0x0),
+        PhotonCell::U4(0xa),
+        PhotonCell::U4(0xd),
+        PhotonCell::U4(0x3),
+        PhotonCell::U4(0xe),
+        PhotonCell::U4(0xf),
+        PhotonCell::U4(0x8),
+        PhotonCell::U4(0x4),
+        PhotonCell::U4(0x7),
+        PhotonCell::U4(0x1),
+        PhotonCell::U4(0x2),
     ];
 
-    pub(super) const ROUND_CONSTANTS: [U4; 12] = [
-        U4(1),
-        U4(3),
-        U4(7),
-        U4(14),
-        U4(13),
-        U4(11),
-        U4(6),
-        U4(12),
-        U4(9),
-        U4(2),
-        U4(5),
-        U4(10),
+    pub(super) const ROUND_CONSTANTS: [PhotonCell; 12] = [
+        PhotonCell::U4(1),
+        PhotonCell::U4(3),
+        PhotonCell::U4(7),
+        PhotonCell::U4(14),
+        PhotonCell::U4(13),
+        PhotonCell::U4(11),
+        PhotonCell::U4(6),
+        PhotonCell::U4(12),
+        PhotonCell::U4(9),
+        PhotonCell::U4(2),
+        PhotonCell::U4(5),
+        PhotonCell::U4(10),
     ];
 
-    pub(super) const INTERNAL_CONSTANTS_100: [U4; 5] = [U4(0), U4(1), U4(3), U4(6), U4(4)];
+    pub(super) const INTERNAL_CONSTANTS_100: [PhotonCell; 5] = [
+        PhotonCell::U4(0),
+        PhotonCell::U4(1),
+        PhotonCell::U4(3),
+        PhotonCell::U4(6),
+        PhotonCell::U4(4),
+    ];
 
-    pub(super) const INTERNAL_CONSTANTS_144: [U4; 6] = [U4(0), U4(1), U4(3), U4(7), U4(6), U4(4)];
+    pub(super) const INTERNAL_CONSTANTS_144: [PhotonCell; 6] = [
+        PhotonCell::U4(0),
+        PhotonCell::U4(1),
+        PhotonCell::U4(3),
+        PhotonCell::U4(7),
+        PhotonCell::U4(6),
+        PhotonCell::U4(4),
+    ];
 
-    pub(super) const INTERNAL_CONSTANTS_196: [U4; 7] =
-        [U4(0), U4(1), U4(2), U4(5), U4(3), U4(6), U4(4)];
+    pub(super) const INTERNAL_CONSTANTS_196: [PhotonCell; 7] = [
+        PhotonCell::U4(0),
+        PhotonCell::U4(1),
+        PhotonCell::U4(2),
+        PhotonCell::U4(5),
+        PhotonCell::U4(3),
+        PhotonCell::U4(6),
+        PhotonCell::U4(4),
+    ];
 
-    pub(super) const INTERNAL_CONSTANTS_256: [U4; 8] =
-        [U4(0), U4(1), U4(3), U4(7), U4(15), U4(14), U4(12), U4(8)];
+    pub(super) const INTERNAL_CONSTANTS_256: [PhotonCell; 8] = [
+        PhotonCell::U4(0),
+        PhotonCell::U4(1),
+        PhotonCell::U4(3),
+        PhotonCell::U4(7),
+        PhotonCell::U4(15),
+        PhotonCell::U4(14),
+        PhotonCell::U4(12),
+        PhotonCell::U4(8),
+    ];
 
-    pub(super) const INTERNAL_CONSTANTS_288: [u8; 6] = [0, 1, 3, 7, 6, 4];
+    pub(super) const INTERNAL_CONSTANTS_288: [PhotonCell; 6] = [
+        PhotonCell::U8(0),
+        PhotonCell::U8(1),
+        PhotonCell::U8(3),
+        PhotonCell::U8(7),
+        PhotonCell::U8(6),
+        PhotonCell::U8(4),
+    ];
 
     pub(super) const NUMBER_OF_ROUNDS: usize = 12;
 
-    pub(super) const MIXING_ARRAY_100: [U4; 25] = [
-        U4(1),
-        U4(2),
-        U4(9),
-        U4(9),
-        U4(2),
-        U4(2),
-        U4(5),
-        U4(3),
-        U4(8),
-        U4(13),
-        U4(13),
-        U4(11),
-        U4(10),
-        U4(12),
-        U4(1),
-        U4(1),
-        U4(15),
-        U4(2),
-        U4(3),
-        U4(14),
-        U4(14),
-        U4(14),
-        U4(8),
-        U4(5),
-        U4(12),
+    pub(super) const MIXING_ARRAY_100: [PhotonCell; 25] = [
+        PhotonCell::U4(1),
+        PhotonCell::U4(2),
+        PhotonCell::U4(9),
+        PhotonCell::U4(9),
+        PhotonCell::U4(2),
+        PhotonCell::U4(2),
+        PhotonCell::U4(5),
+        PhotonCell::U4(3),
+        PhotonCell::U4(8),
+        PhotonCell::U4(13),
+        PhotonCell::U4(13),
+        PhotonCell::U4(11),
+        PhotonCell::U4(10),
+        PhotonCell::U4(12),
+        PhotonCell::U4(1),
+        PhotonCell::U4(1),
+        PhotonCell::U4(15),
+        PhotonCell::U4(2),
+        PhotonCell::U4(3),
+        PhotonCell::U4(14),
+        PhotonCell::U4(14),
+        PhotonCell::U4(14),
+        PhotonCell::U4(8),
+        PhotonCell::U4(5),
+        PhotonCell::U4(12),
     ];
 
-    pub(super) const MIXING_ARRAY_144: [U4; 36] = [
-        U4(1),
-        U4(2),
-        U4(8),
-        U4(5),
-        U4(8),
-        U4(2),
-        U4(2),
-        U4(5),
-        U4(1),
-        U4(2),
-        U4(6),
-        U4(12),
-        U4(12),
-        U4(9),
-        U4(15),
-        U4(8),
-        U4(8),
-        U4(13),
-        U4(13),
-        U4(5),
-        U4(11),
-        U4(3),
-        U4(10),
-        U4(1),
-        U4(1),
-        U4(15),
-        U4(13),
-        U4(14),
-        U4(11),
-        U4(8),
-        U4(8),
-        U4(2),
-        U4(3),
-        U4(3),
-        U4(2),
-        U4(8),
+    pub(super) const MIXING_ARRAY_144: [PhotonCell; 36] = [
+        PhotonCell::U4(1),
+        PhotonCell::U4(2),
+        PhotonCell::U4(8),
+        PhotonCell::U4(5),
+        PhotonCell::U4(8),
+        PhotonCell::U4(2),
+        PhotonCell::U4(2),
+        PhotonCell::U4(5),
+        PhotonCell::U4(1),
+        PhotonCell::U4(2),
+        PhotonCell::U4(6),
+        PhotonCell::U4(12),
+        PhotonCell::U4(12),
+        PhotonCell::U4(9),
+        PhotonCell::U4(15),
+        PhotonCell::U4(8),
+        PhotonCell::U4(8),
+        PhotonCell::U4(13),
+        PhotonCell::U4(13),
+        PhotonCell::U4(5),
+        PhotonCell::U4(11),
+        PhotonCell::U4(3),
+        PhotonCell::U4(10),
+        PhotonCell::U4(1),
+        PhotonCell::U4(1),
+        PhotonCell::U4(15),
+        PhotonCell::U4(13),
+        PhotonCell::U4(14),
+        PhotonCell::U4(11),
+        PhotonCell::U4(8),
+        PhotonCell::U4(8),
+        PhotonCell::U4(2),
+        PhotonCell::U4(3),
+        PhotonCell::U4(3),
+        PhotonCell::U4(2),
+        PhotonCell::U4(8),
     ];
 
-    pub(super) const MIXING_ARRAY_196: [U4; 49] = [
-        U4(1),
-        U4(4),
-        U4(6),
-        U4(1),
-        U4(1),
-        U4(6),
-        U4(4),
-        U4(4),
-        U4(2),
-        U4(15),
-        U4(2),
-        U4(5),
-        U4(10),
-        U4(5),
-        U4(5),
-        U4(3),
-        U4(15),
-        U4(10),
-        U4(7),
-        U4(8),
-        U4(13),
-        U4(13),
-        U4(4),
-        U4(11),
-        U4(2),
-        U4(7),
-        U4(15),
-        U4(9),
-        U4(9),
-        U4(15),
-        U4(7),
-        U4(2),
-        U4(11),
-        U4(4),
-        U4(13),
-        U4(13),
-        U4(8),
-        U4(7),
-        U4(10),
-        U4(15),
-        U4(3),
-        U4(5),
-        U4(5),
-        U4(10),
-        U4(5),
-        U4(2),
-        U4(15),
-        U4(2),
-        U4(4),
+    pub(super) const MIXING_ARRAY_196: [PhotonCell; 49] = [
+        PhotonCell::U4(1),
+        PhotonCell::U4(4),
+        PhotonCell::U4(6),
+        PhotonCell::U4(1),
+        PhotonCell::U4(1),
+        PhotonCell::U4(6),
+        PhotonCell::U4(4),
+        PhotonCell::U4(4),
+        PhotonCell::U4(2),
+        PhotonCell::U4(15),
+        PhotonCell::U4(2),
+        PhotonCell::U4(5),
+        PhotonCell::U4(10),
+        PhotonCell::U4(5),
+        PhotonCell::U4(5),
+        PhotonCell::U4(3),
+        PhotonCell::U4(15),
+        PhotonCell::U4(10),
+        PhotonCell::U4(7),
+        PhotonCell::U4(8),
+        PhotonCell::U4(13),
+        PhotonCell::U4(13),
+        PhotonCell::U4(4),
+        PhotonCell::U4(11),
+        PhotonCell::U4(2),
+        PhotonCell::U4(7),
+        PhotonCell::U4(15),
+        PhotonCell::U4(9),
+        PhotonCell::U4(9),
+        PhotonCell::U4(15),
+        PhotonCell::U4(7),
+        PhotonCell::U4(2),
+        PhotonCell::U4(11),
+        PhotonCell::U4(4),
+        PhotonCell::U4(13),
+        PhotonCell::U4(13),
+        PhotonCell::U4(8),
+        PhotonCell::U4(7),
+        PhotonCell::U4(10),
+        PhotonCell::U4(15),
+        PhotonCell::U4(3),
+        PhotonCell::U4(5),
+        PhotonCell::U4(5),
+        PhotonCell::U4(10),
+        PhotonCell::U4(5),
+        PhotonCell::U4(2),
+        PhotonCell::U4(15),
+        PhotonCell::U4(2),
+        PhotonCell::U4(4),
     ];
 
-    pub(super) const MIXING_ARRAY_256: [U4; 64] = [
-        U4(2),
-        U4(4),
-        U4(2),
-        U4(11),
-        U4(2),
-        U4(8),
-        U4(5),
-        U4(6),
-        U4(12),
-        U4(9),
-        U4(8),
-        U4(13),
-        U4(7),
-        U4(7),
-        U4(5),
-        U4(2),
-        U4(4),
-        U4(4),
-        U4(13),
-        U4(13),
-        U4(9),
-        U4(4),
-        U4(13),
-        U4(9),
-        U4(1),
-        U4(6),
-        U4(5),
-        U4(1),
-        U4(12),
-        U4(13),
-        U4(15),
-        U4(14),
-        U4(15),
-        U4(12),
-        U4(9),
-        U4(13),
-        U4(14),
-        U4(5),
-        U4(14),
-        U4(13),
-        U4(9),
-        U4(14),
-        U4(5),
-        U4(15),
-        U4(4),
-        U4(12),
-        U4(9),
-        U4(6),
-        U4(12),
-        U4(2),
-        U4(2),
-        U4(10),
-        U4(3),
-        U4(1),
-        U4(1),
-        U4(14),
-        U4(15),
-        U4(1),
-        U4(13),
-        U4(10),
-        U4(5),
-        U4(10),
-        U4(2),
-        U4(3),
+    pub(super) const MIXING_ARRAY_256: [PhotonCell; 64] = [
+        PhotonCell::U4(2),
+        PhotonCell::U4(4),
+        PhotonCell::U4(2),
+        PhotonCell::U4(11),
+        PhotonCell::U4(2),
+        PhotonCell::U4(8),
+        PhotonCell::U4(5),
+        PhotonCell::U4(6),
+        PhotonCell::U4(12),
+        PhotonCell::U4(9),
+        PhotonCell::U4(8),
+        PhotonCell::U4(13),
+        PhotonCell::U4(7),
+        PhotonCell::U4(7),
+        PhotonCell::U4(5),
+        PhotonCell::U4(2),
+        PhotonCell::U4(4),
+        PhotonCell::U4(4),
+        PhotonCell::U4(13),
+        PhotonCell::U4(13),
+        PhotonCell::U4(9),
+        PhotonCell::U4(4),
+        PhotonCell::U4(13),
+        PhotonCell::U4(9),
+        PhotonCell::U4(1),
+        PhotonCell::U4(6),
+        PhotonCell::U4(5),
+        PhotonCell::U4(1),
+        PhotonCell::U4(12),
+        PhotonCell::U4(13),
+        PhotonCell::U4(15),
+        PhotonCell::U4(14),
+        PhotonCell::U4(15),
+        PhotonCell::U4(12),
+        PhotonCell::U4(9),
+        PhotonCell::U4(13),
+        PhotonCell::U4(14),
+        PhotonCell::U4(5),
+        PhotonCell::U4(14),
+        PhotonCell::U4(13),
+        PhotonCell::U4(9),
+        PhotonCell::U4(14),
+        PhotonCell::U4(5),
+        PhotonCell::U4(15),
+        PhotonCell::U4(4),
+        PhotonCell::U4(12),
+        PhotonCell::U4(9),
+        PhotonCell::U4(6),
+        PhotonCell::U4(12),
+        PhotonCell::U4(2),
+        PhotonCell::U4(2),
+        PhotonCell::U4(10),
+        PhotonCell::U4(3),
+        PhotonCell::U4(1),
+        PhotonCell::U4(1),
+        PhotonCell::U4(14),
+        PhotonCell::U4(15),
+        PhotonCell::U4(1),
+        PhotonCell::U4(13),
+        PhotonCell::U4(10),
+        PhotonCell::U4(5),
+        PhotonCell::U4(10),
+        PhotonCell::U4(2),
+        PhotonCell::U4(3),
     ];
 
-    pub(super) const MIXING_ARRAY_288: [u8; 36] = [
-        2, 3, 1, 2, 1, 4, 8, 14, 7, 9, 6, 17, 34, 59, 31, 37, 24, 66, 132, 228, 121, 155, 103, 11,
-        22, 153, 239, 111, 144, 75, 150, 203, 210, 121, 36, 167,
+    pub(super) const MIXING_ARRAY_288: [PhotonCell; 36] = [
+        PhotonCell::U8(2),
+        PhotonCell::U8(3),
+        PhotonCell::U8(1),
+        PhotonCell::U8(2),
+        PhotonCell::U8(1),
+        PhotonCell::U8(4),
+        PhotonCell::U8(8),
+        PhotonCell::U8(14),
+        PhotonCell::U8(7),
+        PhotonCell::U8(9),
+        PhotonCell::U8(6),
+        PhotonCell::U8(17),
+        PhotonCell::U8(34),
+        PhotonCell::U8(59),
+        PhotonCell::U8(31),
+        PhotonCell::U8(37),
+        PhotonCell::U8(24),
+        PhotonCell::U8(66),
+        PhotonCell::U8(132),
+        PhotonCell::U8(228),
+        PhotonCell::U8(121),
+        PhotonCell::U8(155),
+        PhotonCell::U8(103),
+        PhotonCell::U8(11),
+        PhotonCell::U8(22),
+        PhotonCell::U8(153),
+        PhotonCell::U8(239),
+        PhotonCell::U8(111),
+        PhotonCell::U8(144),
+        PhotonCell::U8(75),
+        PhotonCell::U8(150),
+        PhotonCell::U8(203),
+        PhotonCell::U8(210),
+        PhotonCell::U8(121),
+        PhotonCell::U8(36),
+        PhotonCell::U8(167),
     ];
 }
