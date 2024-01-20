@@ -1,4 +1,4 @@
-use ndarray::{Array, Array2, ArrayViewMut1, AssignElem, LinalgScalar};
+use ndarray::{Array2, ArrayViewMut1};
 use num_traits::{One, Zero};
 use std::ops::*;
 
@@ -49,34 +49,64 @@ impl PhotonCell {
         }
     }
 
+    fn powby254(self) -> Self {
+        let x = self;
+        let x2 = x * x;
+        let x3 = x * x2;
+        let x6 = x3 * x3;
+        let x12 = x6 * x6;
+        let x15 = x12 * x3;
+        let x30 = x15 * x15;
+        let x60 = x30 * x30;
+        let x120 = x60 * x60;
+        let x126 = x120 * x6;
+        let x127 = x126 * x;
+        x127 * x127
+    }
+
+    fn powby14(self) -> Self {
+        let x = self;
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let x4 = x2 * x2;
+        let x7 = x3 * x4;
+        x7 * x7
+    }
+
     fn inv(self) -> Option<Self> {
-        let mut t: u8 = 0;
-        let mut r: u8 = self.modulo();
-        let mut newt: u8 = 1;
-        let mut newr: u8 = self.value();
-        let mut quotient: u8;
-        while newr != 0 {
-            (quotient, _) = poly_rem_euclid(r, newr);
-            (r, newr) = (
-                newr,
-                r ^ (mul_char_2(quotient, newr, self.bits(), self.modulo())),
-            );
-            (t, newt) = (
-                newt,
-                t ^ (mul_char_2(quotient, newt, self.bits(), self.modulo())),
-            )
-        }
-        if poly_deg(r) > 0 {
+        if self.value() == 0 {
             return None;
         }
-        let result = match self {
-            PhotonCell::U4(_) => PhotonCell::U4(t),
-            PhotonCell::U8(_) => PhotonCell::U8(t),
+        let inverse = match self {
+            PhotonCell::U4(_) => self.powby14(),
+            PhotonCell::U8(_) => self.powby254(),
         };
-
-        assert_eq!(self * result, self.one());
-        Some(result)
+        assert_eq!(self * inverse, self.one());
+        Some(inverse)
     }
+
+    // fn inv(self) -> Option<Self> {
+    //     let mut t: u8 = 0;
+    //     let mut r: u8 = self.modulo();
+    //     let mut newt: u8 = 1;
+    //     let mut newr: u8 = self.value();
+    //     let mut quotient: u8;
+    //     while newr != 0 {
+    //         (quotient, _) = poly_div(r, newr);
+    //         (r, newr) = (newr, r ^ (poly_mul(quotient, newr)) as u8);
+    //         (t, newt) = (newt, t ^ (poly_mul(quotient, newt)) as u8);
+    //     }
+    //     if poly_deg(r) > 0 {
+    //         return None;
+    //     }
+    //     let result = match self {
+    //         PhotonCell::U4(_) => PhotonCell::U4(t),
+    //         PhotonCell::U8(_) => PhotonCell::U8(t),
+    //     };
+
+    //     assert_eq!(self * result, self.one());
+    //     Some(result)
+    // }
 }
 
 impl BitXor for PhotonCell {
@@ -111,16 +141,16 @@ fn poly_deg(p: u8) -> i8 {
     7i8 - (p.leading_zeros() as i8)
 }
 
-fn poly_rem_euclid(lhs: u8, rhs: u8) -> (u8, u8) {
+fn poly_div(lhs: u8, rhs: u8) -> (u8, u8) {
     assert_ne!(rhs, 0, "Cannot divide by 0");
     let mut q: u8 = 0;
     let mut r: u8 = lhs;
     while poly_deg(r) >= poly_deg(rhs) {
-        let pos = u8::try_from(poly_deg(r) - poly_deg(rhs)).expect("deg difference was negative");
+        let pos: u8 = (poly_deg(r) - poly_deg(rhs)).try_into().unwrap();
         q += 1 << pos;
         r ^= rhs << pos;
     }
-    assert_eq!(lhs, q * rhs + r);
+    assert_eq!(u16::from(lhs), poly_mul(q, rhs) ^ r as u16);
     (q, r)
 }
 
@@ -129,16 +159,35 @@ fn mul_char_2(lhs: u8, rhs: u8, bits: usize, modulo: u8) -> u8 {
     let mut b: u8 = rhs;
     let mut p: u8 = 0;
     let mut carry: bool;
+    let cutoff: u8 = if bits >= 8 {
+        0xff
+    } else {
+        (1u8 << bits).saturating_sub(1)
+    };
     for _ in 0..bits {
         if b & 1 == 1 {
-            p ^= a
+            p ^= a;
         }
         b >>= 1;
-        carry = a >> bits == 1;
-        a = (a << 1) & ((1 << bits) - 1);
+        carry = a >> (bits - 1) == 1;
+        a = (a << 1) & cutoff;
         if carry {
             a ^= modulo
         }
+    }
+    p
+}
+
+fn poly_mul(lhs: u8, rhs: u8) -> u16 {
+    let mut a = u16::from(lhs);
+    let mut b = u16::from(rhs);
+    let mut p: u16 = 0;
+    for _ in 0u8..8 {
+        if b & 1 == 1 {
+            p ^= a;
+        }
+        b >>= 1;
+        a <<= 1;
     }
     p
 }
@@ -197,13 +246,14 @@ impl One for PhotonCell {
     }
 }
 
-//0b1101).mul_photon(U4(0b1010)), U4(0b1011)
-
 fn add_constant(state: &mut Array2<PhotonCell>, round: usize, block_size: PhotonBlockSize) {
+    let mut row_ind: usize = 0;
+    let rows = state.shape()[0];
     let internal_constants: &[PhotonCell] = block_size.internal_constants();
-    state
-        .column_mut(0)
-        .map_inplace(|a| *a = *a ^ ROUND_CONSTANTS[round] ^ internal_constants[a.value() as usize])
+    state.column_mut(0).map_inplace(|a| {
+        *a = *a ^ ROUND_CONSTANTS[round] ^ internal_constants[row_ind % rows];
+        row_ind += 1;
+    })
 }
 
 fn bytearray_rotate_left(
@@ -408,6 +458,95 @@ impl PhotonBlockSize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::ShapeBuilder;
+
+    #[test]
+    fn photoncell_arith_test() {
+        //sum
+        let a = PhotonCell::U4(0b1011);
+        let b = PhotonCell::U4(0b1010);
+        assert_eq!(a + b, PhotonCell::U4(0b0001));
+
+        let c = PhotonCell::U4(0b1110);
+        let d = PhotonCell::U4(0b1101);
+        assert_eq!(c + d, PhotonCell::U4(0b0011));
+
+        let e = PhotonCell::U4(0b1000);
+        let f = PhotonCell::U8(0b00100110);
+        assert_eq!(e + f, PhotonCell::U8(0b00101110));
+
+        let g = PhotonCell::U8(0x7d);
+        let h = PhotonCell::U4(0xf);
+        assert_eq!(g + h, PhotonCell::U8(0x72));
+
+        let i = PhotonCell::U8(0x42);
+        let j = PhotonCell::U8(0x69);
+        assert_eq!(i + j, PhotonCell::U8(0x2B));
+
+        // leftshift
+        let k = PhotonCell::U4(0b0101);
+        assert_eq!(k << 1, PhotonCell::U4(0b1010));
+        assert_eq!(k << 2, PhotonCell::U4(0b0100));
+        assert_eq!(k << 3, PhotonCell::U4(0b1000));
+        assert_eq!(k << 4, PhotonCell::U4(0b0000));
+
+        // if this works then all of it should work, it was such a simple implementation
+        let l = PhotonCell::U8(0b01010101);
+        assert_eq!(l << 7, PhotonCell::U8(0b10000000));
+
+        // product
+        let m = PhotonCell::U4(0b1001);
+        let n = PhotonCell::U4(0b0111);
+        assert_eq!(m * n, PhotonCell::U4(0b1010));
+
+        let o = PhotonCell::U4(0b0011);
+        let p = PhotonCell::U4(0b1111);
+        assert_eq!(o * p, PhotonCell::U4(0b0010));
+
+        let q = PhotonCell::U4(0b1001);
+        let r = PhotonCell::U4(0b0011);
+        assert_eq!(q * r, PhotonCell::U4(0b1000));
+
+        let s = PhotonCell::U8(0b01101001);
+        let t = PhotonCell::U8(0b11101010);
+        assert_eq!(s * t, PhotonCell::U8(0b00110111));
+
+        let u = PhotonCell::U8(0b00100111);
+        let v = PhotonCell::U8(0b11100110);
+        assert_eq!(u * v, PhotonCell::U8(0b01011011));
+
+        let w = PhotonCell::U8(0b10010011);
+        let x = PhotonCell::U8(0b01001001);
+        assert_eq!(w * x, PhotonCell::U8(0b10000110));
+
+        // division and deg
+
+        let y: u8 = 0b01110001;
+        let z: u8 = 0b00001100;
+        assert_eq!(poly_div(y, z), (0b00001011, 0b00000101));
+        assert_eq!(poly_deg(y), 6);
+        assert_eq!(poly_deg(z), 3);
+
+        let a1: u8 = 0b11011001;
+        let b1: u8 = 0b00001111;
+        assert_eq!(poly_div(a1, b1), (0b00010111, 0b00000100));
+        assert_eq!(poly_deg(a1), 7);
+        assert_eq!(poly_deg(b1), 3);
+
+        assert_eq!(poly_deg(0), -1);
+        assert_eq!(poly_deg(1), 0);
+        assert_eq!(poly_deg(2), 1);
+
+        // polymul
+        let c1: u8 = 0b11101001;
+        let d1: u8 = 0b00010101;
+        assert_eq!(poly_mul(c1, d1), 0b0000110111011101);
+
+        let e1: u8 = 0b00110101;
+        let f1: u8 = 0b11011010;
+        assert_eq!(poly_mul(e1, f1), 0b0001010101010010);
+    }
+
     #[test]
     fn shift_rows_test() {
         let mut test_array: Array2<PhotonCell> =
@@ -446,6 +585,34 @@ mod tests {
         .unwrap();
         shift_rows(&mut test_array, PhotonBlockSize::P100);
         assert_eq!(test_array, resulting_array);
+    }
+
+    #[test]
+    fn inverse_test() {
+        let a = PhotonCell::U8(0b01011011);
+        assert_eq!(a.inv(), Some(PhotonCell::U8(0b11110000)));
+    }
+
+    #[test]
+    fn add_constant_test() {
+        let mut state: Array2<PhotonCell> = Array2::zeros((5, 5));
+        let afterstate: Array2<PhotonCell> = Array2::from_shape_vec(
+            (5, 5).f(),
+            [
+                vec![
+                    PhotonCell::U4(1),
+                    PhotonCell::U4(0),
+                    PhotonCell::U4(2),
+                    PhotonCell::U4(7),
+                    PhotonCell::U4(5),
+                ],
+                [PhotonCell::U4(0)].repeat(20),
+            ]
+            .concat(),
+        )
+        .unwrap();
+        add_constant(&mut state, 0, PhotonBlockSize::P100);
+        assert_eq!(state, afterstate);
     }
 }
 

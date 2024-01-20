@@ -150,7 +150,7 @@ fn compress_2b(state: &mut [u64; 8], chunk: &[u8; 128], offset: u128, is_last: b
 pub fn blake2b<const HASH_LEN: usize>(input: &[u8], key: Option<Vec<u8>>) -> [u8; HASH_LEN] {
     assert!(HASH_LEN <= 64 && 0 < HASH_LEN);
     // Take the key
-    let key: Vec<u8> = key.unwrap_or(Vec::new());
+    let key: Vec<u8> = key.unwrap_or_default();
     assert!(key.len() <= 64);
     // Init the state
     let mut state: [u64; 8] = INITIALIZATION_VECTOR_2B;
@@ -330,7 +330,7 @@ fn compress_2s(state: &mut [u32; 8], chunk: &[u8; 64], offset: u64, is_last: boo
 pub fn blake2s<const HASH_LEN: usize>(input: &[u8], key: Option<Vec<u8>>) -> [u8; HASH_LEN] {
     assert!(HASH_LEN <= 32 && 0 < HASH_LEN);
     // Take the key
-    let key: Vec<u8> = key.unwrap_or(Vec::new());
+    let key: Vec<u8> = key.unwrap_or_default();
     assert!(key.len() <= 32);
     // Init the state
     let mut state: [u32; 8] = INITIALIZATION_VECTOR_2S;
