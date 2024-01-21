@@ -1,4 +1,4 @@
-use std::ops::BitXor;
+use std::{collections::btree_map::Keys, ops::BitXor};
 
 use num_traits::ops::mul_add;
 
@@ -30,7 +30,8 @@ where
 {
     fn ecb_encrypt(key: &[u8; KEY_SIZE_BYTES], plain_text: &[u8]) -> Vec<[u8; BLOCK_SIZE_BYTES]> {
         let mut cypher_text: Vec<[u8; BLOCK_SIZE_BYTES]> = Vec::with_capacity(
-            plain_text.len() + bytes_needed_to_fit(plain_text.len(), BLOCK_SIZE_BYTES),
+            (plain_text.len() + bytes_needed_to_fit(plain_text.len(), BLOCK_SIZE_BYTES))
+                .div_ceil(BLOCK_SIZE_BYTES),
         );
         cypher_text.extend(Self::pad(plain_text).map(|block| Self::encrypt_block(key, &block)));
         cypher_text
@@ -64,7 +65,8 @@ where
     ) -> Vec<[u8; BLOCK_SIZE_BYTES]> {
         let padded_text = Self::pad(plain_text);
         let mut cypher_text: Vec<[u8; BLOCK_SIZE_BYTES]> = Vec::with_capacity(
-            plain_text.len() + bytes_needed_to_fit(plain_text.len(), BLOCK_SIZE_BYTES),
+            (plain_text.len() + bytes_needed_to_fit(plain_text.len(), BLOCK_SIZE_BYTES))
+                .div_ceil(BLOCK_SIZE_BYTES),
         );
         let mut iv: [u8; BLOCK_SIZE_BYTES] = iv;
         let mut cypher_block: [u8; BLOCK_SIZE_BYTES];
@@ -97,6 +99,53 @@ where
 
 impl<T, const BLOCK_SIZE_BYTES: usize, const KEY_SIZE_BYTES: usize>
     CBC<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES> for T
+where
+    T: BlockCypher<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES> + Padding<BLOCK_SIZE_BYTES>,
+{
+}
+
+pub trait PCBC<const BLOCK_SIZE_BYTES: usize, const KEY_SIZE_BYTES: usize>
+where
+    Self: BlockCypher<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES> + Padding<BLOCK_SIZE_BYTES>,
+{
+    fn pcbc_encrypt(
+        key: &[u8; KEY_SIZE_BYTES],
+        plain_text: &[u8],
+        iv: [u8; BLOCK_SIZE_BYTES],
+    ) -> Vec<[u8; BLOCK_SIZE_BYTES]> {
+        let padded_text = Self::pad(plain_text);
+        let mut cypher_text: Vec<[u8; BLOCK_SIZE_BYTES]> = Vec::with_capacity(
+            (plain_text.len() + bytes_needed_to_fit(plain_text.len(), BLOCK_SIZE_BYTES))
+                .div_ceil(BLOCK_SIZE_BYTES),
+        );
+        let mut iv = iv;
+        let mut cypher_block: [u8; BLOCK_SIZE_BYTES];
+        for block in padded_text {
+            cypher_block = Self::encrypt_block(key, &zip_with(block, iv, BitXor::bitxor));
+            iv = zip_with(cypher_block, block, BitXor::bitxor);
+            cypher_text.push(cypher_block);
+        }
+        cypher_text
+    }
+    fn pcbc_decrypt(
+        key: &[u8; KEY_SIZE_BYTES],
+        cypher_text: &[[u8; BLOCK_SIZE_BYTES]],
+        iv: [u8; BLOCK_SIZE_BYTES],
+    ) -> Vec<u8> {
+        let mut plain_text: Vec<[u8; BLOCK_SIZE_BYTES]> = Vec::with_capacity(cypher_text.len());
+        let mut iv = iv;
+        let mut plain_block: [u8; BLOCK_SIZE_BYTES];
+        for block in cypher_text {
+            plain_block = zip_with(Self::decrypt_block(key, block), iv, BitXor::bitxor);
+            iv = zip_with(plain_block, *block, BitXor::bitxor);
+            plain_text.push(plain_block);
+        }
+        Self::unpad(&plain_text)
+    }
+}
+
+impl<T, const BLOCK_SIZE_BYTES: usize, const KEY_SIZE_BYTES: usize>
+    PCBC<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES> for T
 where
     T: BlockCypher<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES> + Padding<BLOCK_SIZE_BYTES>,
 {
