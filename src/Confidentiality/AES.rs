@@ -1,6 +1,6 @@
 use ndarray::prelude::*;
 
-use crate::Block_cypher::{BlockCypher, Padding, ECB};
+use crate::Block_cypher::{BlockCypher, Padding, CBC, ECB};
 type AESState = Array2<u8>;
 
 #[derive(Debug, PartialEq)]
@@ -480,7 +480,7 @@ fn PKCS5_padding_test() {
 #[test]
 fn ecb_encryption_decryption_test() {
     let message = b"Yass queen SLAYYYYYY";
-    let key: Vec<u8> = vec![
+    let key: [u8; 16] = [
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
         0x0f,
     ];
@@ -489,7 +489,7 @@ fn ecb_encryption_decryption_test() {
         0xc2, 0x8a, 0x93, 0xfc, 0x60, 0x78, 0x7c, 0x56, 0x5d, 0x72, 0xf6, 0x36, 0x34, 0x14, 0x04,
         0x81, 0xb8,
     ];
-    let encrypted_message = AES::ecb_encrypt(&key.clone().try_into().unwrap(), message);
+    let encrypted_message = AES::ecb_encrypt(&key, message);
     assert_eq!(
         encrypted_message
             .iter()
@@ -498,6 +498,31 @@ fn ecb_encryption_decryption_test() {
             .collect::<Vec<u8>>(),
         encrypted_should_message
     );
-    let decrypted_message = AES::ecb_decrypt(&key.try_into().unwrap(), &encrypted_message);
+    let decrypted_message = AES::ecb_decrypt(&key, &encrypted_message);
+    assert_eq!(decrypted_message, message.to_vec());
+}
+
+#[test]
+fn cbc_encrypt_decrypt_test() {
+    let message = b"Yass queen SLAYYYYYY";
+    let key: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
+    ];
+    let encypted_should_message: Vec<u8> = vec![
+        0x59, 0xab, 0xbb, 0x97, 0xca, 0xf7, 0x2b, 0x2f, 0x12, 0xda, 0x61, 0xc2, 0xbe, 0x9f, 0xe2,
+        0xc2, 0x7e, 0x7c, 0x36, 0x32, 0x53, 0x01, 0x04, 0x13, 0x4f, 0xa2, 0x9b, 0x2d, 0xc9, 0x44,
+        0x14, 0x58,
+    ];
+    let encrypted_message = AES::cbc_encrypt(&key, message, [0x00; 16]);
+    assert_eq!(
+        encrypted_message
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>(),
+        encypted_should_message
+    );
+    let decrypted_message = AES::cbc_decrypt(&key, &encrypted_message, [0x00; 16]);
     assert_eq!(decrypted_message, message.to_vec());
 }

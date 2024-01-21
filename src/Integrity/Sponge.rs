@@ -3,7 +3,7 @@ use std::fmt::Debug;
 pub mod Keccak;
 mod Photon;
 
-fn zip_with<const N: usize, T, U, V: Debug, F: Fn(T, U) -> V>(
+pub(crate) fn zip_with<const N: usize, T, U, V: Debug, F: Fn(T, U) -> V>(
     arr1: [T; N],
     arr2: [U; N],
     f: F,
