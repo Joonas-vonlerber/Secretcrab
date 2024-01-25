@@ -6,7 +6,7 @@
     unused_variables,
     clippy::upper_case_acronyms
 )]
-#![feature(array_chunks, const_option)]
+#![feature(array_chunks, const_option, iter_map_windows)]
 
 pub mod Integrity {
     pub mod BLAKE;

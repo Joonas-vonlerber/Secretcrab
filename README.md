@@ -19,6 +19,11 @@ The random number generator used in generating keys might not be totally secure.
 - SHA3-224, SHA3-256, SHA3-384, SHA3-512, SHAKE-128, SHAKE-256
 - Ed25519 signing & verifying
 - BLAKE2B, BLAKE2S, BLAKE2-224, BLAKE2-256, BLAKE2-384, BLAKE2-512
+- Block Cypher trait with different modes such as
+  - ECB
+  - CBC
+  - PCBC
+  - CFB
 
 ## Future
 

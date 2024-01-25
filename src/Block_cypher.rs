@@ -150,3 +150,65 @@ where
     T: BlockCypher<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES> + Padding<BLOCK_SIZE_BYTES>,
 {
 }
+
+pub trait CFB<const BLOCK_SIZE_BYTES: usize, const KEY_SIZE_BYTES: usize>
+where
+    Self: BlockCypher<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES>,
+{
+    fn cfb_encrypt(
+        key: &[u8; KEY_SIZE_BYTES],
+        plain_text: &[u8],
+        iv: [u8; BLOCK_SIZE_BYTES],
+    ) -> Vec<u8> {
+        let mut cypher_text: Vec<u8> = Vec::with_capacity(plain_text.len());
+        let block_iterator = plain_text.array_chunks::<BLOCK_SIZE_BYTES>();
+        let remainder = block_iterator.remainder();
+        let mut key_block: [u8; BLOCK_SIZE_BYTES] = iv;
+        let mut cypher_block: [u8; BLOCK_SIZE_BYTES] = [0x00; BLOCK_SIZE_BYTES];
+        cypher_text.extend(block_iterator.flat_map(|block| {
+            cypher_block = zip_with(Self::encrypt_block(key, &key_block), *block, BitXor::bitxor);
+            key_block = cypher_block;
+            cypher_block
+        }));
+        cypher_text.extend(
+            remainder
+                .iter()
+                .zip(Self::encrypt_block(key, &key_block))
+                .map(|(a, b)| a ^ b),
+        );
+        cypher_text
+    }
+    fn cfb_decrypt(
+        key: &[u8; KEY_SIZE_BYTES],
+        cypher_text: &[u8],
+        iv: [u8; BLOCK_SIZE_BYTES],
+    ) -> Vec<u8> {
+        let mut plain_text: Vec<u8> = Vec::with_capacity(cypher_text.len());
+        let block_iterator = cypher_text.array_chunks::<BLOCK_SIZE_BYTES>();
+        let remainder = block_iterator.remainder();
+        plain_text.extend(
+            std::iter::once(&iv)
+                .chain(block_iterator.clone())
+                .map_windows(|[prev, &curr]| {
+                    zip_with(Self::encrypt_block(key, prev), curr, BitXor::bitxor)
+                })
+                .flatten(),
+        );
+        if let Some(last) = block_iterator.last() {
+            plain_text.extend(
+                Self::encrypt_block(key, last)
+                    .into_iter()
+                    .zip(remainder.iter())
+                    .map(|(a, b)| a ^ b),
+            );
+        }
+        plain_text
+    }
+}
+
+impl<T, const BLOCK_SIZE_BYTES: usize, const KEY_SIZE_BYTES: usize>
+    CFB<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES> for T
+where
+    T: BlockCypher<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES>,
+{
+}

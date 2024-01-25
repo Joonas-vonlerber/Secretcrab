@@ -1,6 +1,6 @@
 use ndarray::prelude::*;
 
-use crate::Block_cypher::{BlockCypher, Padding, CBC, ECB, PCBC};
+use crate::Block_cypher::{BlockCypher, Padding, CBC, CFB, ECB, PCBC};
 type AESState = Array2<u8>;
 
 #[derive(Debug, PartialEq)]
@@ -307,6 +307,7 @@ fn unpad_PKCS5<const AMOUNT: usize>(data: [u8; AMOUNT]) -> Result<Vec<u8>, [u8; 
 }
 
 impl Padding<16> for AES {
+    /// PCKS#5 padding for the AES block cypher
     fn pad(data: &[u8]) -> impl Iterator<Item = [u8; 16]> {
         let block_iterator = data.array_chunks::<16>();
         let remainder = block_iterator.remainder();
@@ -314,6 +315,7 @@ impl Padding<16> for AES {
             .copied()
             .chain(std::iter::once(pad_PKCS5::<16>(remainder)))
     }
+    /// PCKS#5 unpadding for the AES block cypher
     /// ## Panics
     /// if data.len() = 0
     fn unpad(data: &[[u8; 16]]) -> Vec<u8> {
@@ -328,6 +330,7 @@ impl Padding<16> for AES {
         buf
     }
 }
+
 // LOOKUP TABLES AHEAD
 
 const AES_S_BOX: [u8; 256] = [
@@ -549,5 +552,21 @@ fn pcbc_encrypt_decrypt_test() {
     //     encypted_should_message
     // );
     let decrypted_message = AES::pcbc_decrypt(&key, &encrypted_message, [0x01; 16]);
+    assert_eq!(decrypted_message, message.to_vec()); // at least they are inverses of each other so it should work ??
+}
+#[test]
+fn cfb_encrypt_decrypt_test() {
+    let message = b"Yass queen SLAYYYYYY";
+    let key: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
+    ];
+    let encypted_should_message: Vec<u8> = vec![
+        0x9a, 0x33, 0xf3, 0x24, 0x74, 0x52, 0x0a, 0x54, 0x7f, 0xae, 0xdf, 0xa7, 0xaf, 0xa1, 0x67,
+        0x21, 0xa7, 0xc1, 0x2e, 0xf5,
+    ];
+    let encrypted_message = AES::cfb_encrypt(&key, message, [0x01; 16]);
+    assert_eq!(encrypted_message, encypted_should_message);
+    let decrypted_message = AES::cfb_decrypt(&key, &encrypted_message, [0x01; 16]);
     assert_eq!(decrypted_message, message.to_vec());
 }
