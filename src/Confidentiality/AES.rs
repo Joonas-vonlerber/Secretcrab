@@ -1,6 +1,6 @@
 use ndarray::prelude::*;
 
-use crate::Block_cypher::{BlockCypher, Padding, CBC, CFB, ECB, PCBC};
+use crate::Block_cypher::{BlockCypher, Padding, CBC, CFB, ECB, OFB, PCBC};
 type AESState = Array2<u8>;
 
 #[derive(Debug, PartialEq)]
@@ -568,5 +568,22 @@ fn cfb_encrypt_decrypt_test() {
     let encrypted_message = AES::cfb_encrypt(&key, message, [0x01; 16]);
     assert_eq!(encrypted_message, encypted_should_message);
     let decrypted_message = AES::cfb_decrypt(&key, &encrypted_message, [0x01; 16]);
+    assert_eq!(decrypted_message, message.to_vec());
+}
+
+#[test]
+fn ofb_encrypt_decrypt_test() {
+    let message = b"Yass queen SLAYYYYYY";
+    let key: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
+    ];
+    let encypted_should_message: Vec<u8> = vec![
+        0x9a, 0x33, 0xf3, 0x24, 0x74, 0x52, 0x0a, 0x54, 0x7f, 0xae, 0xdf, 0xa7, 0xaf, 0xa1, 0x67,
+        0x21, 0xd1, 0x0a, 0x27, 0x68,
+    ];
+    let encrypted_message = AES::ofb_encrypt(&key, message, [0x01; 16]);
+    assert_eq!(encrypted_message, encypted_should_message);
+    let decrypted_message = AES::ofb_decrypt(&key, &encrypted_message, [0x01; 16]);
     assert_eq!(decrypted_message, message.to_vec());
 }

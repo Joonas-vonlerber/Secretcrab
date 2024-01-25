@@ -212,3 +212,34 @@ where
     T: BlockCypher<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES>,
 {
 }
+
+pub trait OFB<const BLOCK_SIZE_BYTES: usize, const KEY_SIZE_BYTES: usize>
+where
+    Self: BlockCypher<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES>,
+{
+    fn ofb_encrypt(
+        key: &[u8; KEY_SIZE_BYTES],
+        plain_text: &[u8],
+        iv: [u8; BLOCK_SIZE_BYTES],
+    ) -> Vec<u8> {
+        let mut cypher_text: Vec<u8> = Vec::with_capacity(plain_text.len());
+        let crypted_iv = Self::encrypt_block(key, &iv);
+        let key_stream =
+            std::iter::successors(Some(crypted_iv), |a| Some(Self::encrypt_block(key, a)));
+        let chunks = plain_text.chunks(BLOCK_SIZE_BYTES);
+        cypher_text.extend(key_stream.zip(chunks).flat_map(|(key_stream, block)| {
+            key_stream.into_iter().zip(block.iter()).map(|(a, b)| a ^ b)
+        }));
+        cypher_text
+    }
+    /// OFB encryption and decryption are the same thing
+    fn ofb_decrypt(
+        key: &[u8; KEY_SIZE_BYTES],
+        cypher_text: &[u8],
+        iv: [u8; BLOCK_SIZE_BYTES],
+    ) -> Vec<u8> {
+        Self::ofb_encrypt(key, cypher_text, iv)
+    }
+}
+
+impl<T, const B: usize, const K: usize> OFB<B, K> for T where T: BlockCypher<B, K> {}
