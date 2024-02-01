@@ -11,13 +11,6 @@ enum AESKeySize {
 }
 
 impl AESKeySize {
-    fn key_size_in_32_words(&self) -> usize {
-        match self {
-            Self::Key128 => 4,
-            Self::Key192 => 6,
-            Self::Key256 => 8,
-        }
-    }
     fn rounds_keys_needed(&self) -> usize {
         match self {
             Self::Key128 => 11,
@@ -44,8 +37,7 @@ fn rotate_word(word: u32) -> u32 {
 }
 
 fn key_schedule(original_key: &[u32], round_keys_needed: usize) -> Vec<u32> {
-    let mut expanded_keys: Vec<u32> = Vec::new();
-    expanded_keys.reserve_exact(4 * round_keys_needed);
+    let mut expanded_keys: Vec<u32> = Vec::with_capacity(4 * round_keys_needed);
     let lenght = original_key.len();
     for round in 0..(4 * round_keys_needed) {
         expanded_keys.push(match round {
@@ -73,8 +65,7 @@ fn key_schedule(original_key: &[u32], round_keys_needed: usize) -> Vec<u32> {
     // .collect::<Vec<_>>()
 }
 
-fn words_to_state(words: &[u32]) -> AESState {
-    assert_eq!(words.len(), 4);
+fn words_to_state(words: &[u32; 4]) -> AESState {
     Array2::from_shape_vec(
         (4, 4).f(),
         words.iter().flat_map(|word| word.to_be_bytes()).collect(),
@@ -189,39 +180,76 @@ fn inverse_mix_colums(state: &mut AESState) {
     }
 }
 
-fn encryption(state: &mut AESState, key: &[u32], key_lenght: &AESKeySize) {
-    let round_keys: Vec<AESState> = key_schedule(key, key_lenght.rounds_keys_needed())
-        .chunks(4)
+fn encryption<const KEY_SIZE_BYTES: usize>(
+    block: [u8; 16],
+    key: &[u8; KEY_SIZE_BYTES],
+) -> [u8; 16] {
+    let mut state = block_to_array(block);
+    let needed_keys = match KEY_SIZE_BYTES {
+        16 => 11,
+        24 => 13,
+        32 => 15,
+        _ => unimplemented!("AES not defined for {} bit keys", KEY_SIZE_BYTES * 8),
+    };
+    let key_in_32_bit: Vec<u32> = key
+        .array_chunks::<4>()
+        .map(|x| u32::from_be_bytes(*x))
+        .collect();
+    let round_keys: Vec<AESState> = key_schedule(&key_in_32_bit, needed_keys)
+        .array_chunks::<4>()
         .map(words_to_state)
         .collect();
-    add_round_key(state, round_keys.first().unwrap());
+
+    // AES ALGORITHM
+    add_round_key(&mut state, round_keys.first().unwrap());
     for round_key in round_keys[1..(round_keys.len() - 1)].iter() {
-        sub_bytes(state);
-        shift_rows(state);
-        mix_columns(state);
-        add_round_key(state, round_key);
+        sub_bytes(&mut state);
+        shift_rows(&mut state);
+        mix_columns(&mut state);
+        add_round_key(&mut state, round_key);
     }
-    sub_bytes(state);
-    shift_rows(state);
-    add_round_key(state, round_keys.last().unwrap());
+    sub_bytes(&mut state);
+    shift_rows(&mut state);
+    add_round_key(&mut state, round_keys.last().unwrap());
+
+    state.into_raw_vec().try_into().unwrap()
 }
 
-fn decryption(state: &mut AESState, key: &[u32], key_lenght: &AESKeySize) {
-    let round_keys: Vec<AESState> = key_schedule(key, key_lenght.rounds_keys_needed())
-        .chunks(4)
+fn decryption<const KEY_SIZE_BYTES: usize>(
+    block: [u8; 16],
+    key: &[u8; KEY_SIZE_BYTES],
+) -> [u8; 16] {
+    let mut state = block_to_array(block);
+    let needed_keys = match KEY_SIZE_BYTES {
+        16 => 11,
+        24 => 13,
+        32 => 15,
+        _ => unimplemented!("AES not defined for {} bit keys", KEY_SIZE_BYTES * 8),
+    };
+    let key_in_32_bit: Vec<u32> = key
+        .array_chunks::<4>()
+        .map(|x| u32::from_be_bytes(*x))
+        .collect();
+
+    let round_keys: Vec<AESState> = key_schedule(&key_in_32_bit, needed_keys)
+        .array_chunks::<4>()
         .map(words_to_state)
         .rev()
         .collect();
-    add_round_key(state, round_keys.first().unwrap());
+
+    // AES decryption algorithm
+    add_round_key(&mut state, round_keys.first().unwrap());
     for round_key in round_keys[1..(round_keys.len() - 1)].iter() {
-        inverse_shift_rows(state);
-        inverse_sub_bytes(state);
-        add_round_key(state, round_key);
-        inverse_mix_colums(state);
+        inverse_shift_rows(&mut state);
+        inverse_sub_bytes(&mut state);
+        add_round_key(&mut state, round_key);
+        inverse_mix_colums(&mut state);
     }
-    inverse_shift_rows(state);
-    inverse_sub_bytes(state);
-    add_round_key(state, round_keys.last().unwrap());
+    inverse_shift_rows(&mut state);
+    inverse_sub_bytes(&mut state);
+    add_round_key(&mut state, round_keys.last().unwrap());
+
+    state.into_raw_vec().try_into().unwrap()
 }
 
 fn pad_ANSIX923_message(input: &[u8]) -> Vec<u8> {
@@ -253,22 +281,28 @@ struct AES;
 
 impl BlockCypher<16, 16> for AES {
     fn encrypt_block(key: &[u8; 16], plain_text_block: &[u8; 16]) -> [u8; 16] {
-        let mut block = block_to_array(*plain_text_block);
-        let key_u32: Vec<u32> = key
-            .array_chunks::<4>()
-            .map(|word| u32::from_be_bytes(*word)) // LE or BE??
-            .collect();
-        encryption(&mut block, &key_u32[..], &AESKeySize::Key128);
-        block.into_raw_vec().try_into().unwrap()
+        encryption::<16>(*plain_text_block, key)
     }
     fn decrypt_block(key: &[u8; 16], cypher_text_block: &[u8; 16]) -> [u8; 16] {
-        let mut block = block_to_array(*cypher_text_block);
-        let key_u32: Vec<u32> = key
-            .array_chunks::<4>()
-            .map(|word| u32::from_be_bytes(*word)) // LE or BE??
-            .collect();
-        decryption(&mut block, &key_u32, &AESKeySize::Key128);
-        block.into_raw_vec().try_into().unwrap()
+        decryption::<16>(*cypher_text_block, key)
+    }
+}
+
+impl BlockCypher<16, 24> for AES {
+    fn encrypt_block(key: &[u8; 24], plain_text_block: &[u8; 16]) -> [u8; 16] {
+        encryption::<24>(*plain_text_block, key)
+    }
+    fn decrypt_block(key: &[u8; 24], cypher_text_block: &[u8; 16]) -> [u8; 16] {
+        decryption::<24>(*cypher_text_block, key)
+    }
+}
+
+impl BlockCypher<16, 32> for AES {
+    fn encrypt_block(key: &[u8; 32], plain_text_block: &[u8; 16]) -> [u8; 16] {
+        encryption::<32>(*plain_text_block, key)
+    }
+    fn decrypt_block(key: &[u8; 32], cypher_text_block: &[u8; 16]) -> [u8; 16] {
+        decryption::<32>(*cypher_text_block, key)
     }
 }
 /// PKCS#5 padding
@@ -443,14 +477,18 @@ fn mix_columns_test() {
 
 #[test]
 fn encryption_decryption_test() {
-    let mut test_vector: AESState =
-        words_to_state(&[0x00112233, 0x44556677, 0x8899aabb, 0xccddeeff]);
-    let resulting_vec = test_vector.clone();
-    let key = &[0x00010203, 0x04050607, 0x08090a0b, 0x0c0d0e0f];
-    encryption(&mut test_vector, key, &AESKeySize::Key128);
-    decryption(&mut test_vector, key, &AESKeySize::Key128);
-    // let resulting_vec = words_to_state(&[0x69c4e0d8, 0x6a7b0430, 0xd8cdb780, 0x70b4c55a]);
-    assert_eq!(test_vector, resulting_vec);
+    let plain = b"Hmm kiinnostavaa";
+    let key: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
+    ];
+    let should_crypt = [
+        0x9b, 0x12, 0xe8, 0xca, 0x6d, 0xc6, 0x16, 0x11, 0x2b, 0x50, 0xd2, 0xf3, 0x86, 0xca, 0x81,
+        0x00,
+    ];
+    let cypher = encryption(*plain, &key);
+    assert_eq!(cypher, should_crypt);
+    assert_eq!(decryption(cypher, &key), *plain);
 }
 
 #[test]

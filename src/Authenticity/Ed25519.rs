@@ -5,7 +5,7 @@ use crypto_bigint::{
 
 use crate::Integrity::SHA::sha_512;
 use const_hex::const_decode_to_array;
-use rand::prelude::*;
+use rand::{prelude::*, rngs::OsRng};
 
 const fn ct_eq(lhs_res: &GF25519, rhs_res: &GF25519) -> bool {
     let mut acc = 0;
@@ -67,7 +67,7 @@ fn sqrt(quad_residue: &GF25519) -> Option<(GF25519, GF25519)> {
     );
 
     // Find a non quadratic residue
-    let mut rng = thread_rng();
+    let mut rng = OsRng;
     let mut non_residue: GF25519 = GF25519::random(&mut rng);
     while is_quadratic_residue(&non_residue) || non_residue.as_montgomery() == &U256::ZERO {
         non_residue = GF25519::random(&mut rng);

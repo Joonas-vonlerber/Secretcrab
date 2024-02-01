@@ -24,12 +24,14 @@ The random number generator used in generating keys might not be totally secure.
   - CBC
   - PCBC
   - CFB
+  - OFB
 
 ## Future
 
 I am planning on implementing
 
-- Photon
+- More Block Cypher modes: GCM, CTR
+- Photon (Need to get proper test vectors)
 - Argon2
 - Diffie-Heilman
 
