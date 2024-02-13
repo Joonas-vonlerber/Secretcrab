@@ -1,8 +1,7 @@
 use std::ops::BitXor;
 
-use num_traits::ops::mul_add;
-
 use crate::Integrity::Sponge::zip_with;
+use std::iter::successors;
 
 pub trait BlockCypher<const BLOCK_SIZE_BYTES: usize, const KEY_SIZE_BYTES: usize> {
     fn encrypt_block(
@@ -22,6 +21,21 @@ pub trait Padding<const BLOCK_SIZE_BYTES: usize> {
 
 fn bytes_needed_to_fit(data_len: usize, block_size: usize) -> usize {
     block_size - (data_len % block_size)
+}
+pub trait Counter<const BLOCK_SIZE_BYTES: usize> {
+    type Counter;
+    fn init_counter(init_value: [u8; BLOCK_SIZE_BYTES]) -> Self::Counter;
+    fn increment(counter: &Self::Counter) -> Self::Counter;
+    fn to_block(counter: &Self::Counter) -> [u8; BLOCK_SIZE_BYTES];
+    fn generate_stream(
+        init_value: [u8; BLOCK_SIZE_BYTES],
+    ) -> impl Iterator<Item = [u8; BLOCK_SIZE_BYTES]> {
+        successors(
+            Some(Self::init_counter(init_value)),
+            |last: &Self::Counter| Some(Self::increment(last)),
+        )
+        .map(|x: Self::Counter| Self::to_block(&x))
+    }
 }
 
 pub trait ECB<const BLOCK_SIZE_BYTES: usize, const KEY_SIZE_BYTES: usize>
@@ -224,8 +238,7 @@ where
     ) -> Vec<u8> {
         let mut cypher_text: Vec<u8> = Vec::with_capacity(plain_text.len());
         let crypted_iv = Self::encrypt_block(key, &iv);
-        let key_stream =
-            std::iter::successors(Some(crypted_iv), |a| Some(Self::encrypt_block(key, a)));
+        let key_stream = successors(Some(crypted_iv), |a| Some(Self::encrypt_block(key, a)));
         let chunks = plain_text.chunks(BLOCK_SIZE_BYTES);
         cypher_text.extend(key_stream.zip(chunks).flat_map(|(key_stream, block)| {
             key_stream.into_iter().zip(block.iter()).map(|(a, b)| a ^ b)
@@ -243,3 +256,64 @@ where
 }
 
 impl<T, const B: usize, const K: usize> OFB<B, K> for T where T: BlockCypher<B, K> {}
+
+pub trait CTR<const BLOCK_SIZE_BYTES: usize, const KEY_SIZE_BYTES: usize>
+where
+    Self: BlockCypher<BLOCK_SIZE_BYTES, KEY_SIZE_BYTES> + Counter<BLOCK_SIZE_BYTES>,
+{
+    fn ctr_encrypt(
+        key: &[u8; KEY_SIZE_BYTES],
+        plain_text: &[u8],
+        IV: [u8; BLOCK_SIZE_BYTES],
+    ) -> Vec<u8> {
+        let mut cypher_text: Vec<u8> = Vec::with_capacity(plain_text.len());
+
+        let key_stream = Self::generate_stream(IV).flat_map(|x| Self::encrypt_block(key, &x));
+
+        #[allow(clippy::useless_conversion)]
+        let combination = plain_text
+            .iter()
+            .zip(key_stream.into_iter())
+            .map(|(a, b)| a ^ b);
+
+        cypher_text.extend(combination);
+        cypher_text
+    }
+    // Hmm is decrypt the same as encrypt?
+    fn ctr_decrypt(
+        key: &[u8; KEY_SIZE_BYTES],
+        cypher_text: &[u8],
+        IV: [u8; BLOCK_SIZE_BYTES],
+    ) -> Vec<u8> {
+        Self::ctr_encrypt(key, cypher_text, IV)
+    }
+}
+
+impl<const B: usize, const K: usize, T> CTR<B, K> for T where T: BlockCypher<B, K> + Counter<B> {}
+
+const fn gf128_poly_add(a: u128, b: u128) -> u128 {
+    a ^ b
+}
+
+const fn gf128_poly_mul(a: u128, b: u128, modulo: u128) -> u128 {
+    let mut acc: i32 = 0;
+    let mut X: u128 = a;
+    let mut Y: u128 = b;
+    let mut p: u128 = 0;
+    let mut carry: bool;
+    while acc < 128 {
+        if Y & 1 == 1 {
+            p ^= X;
+        }
+        Y >>= 1;
+        carry = X >> 127 == 1;
+        X <<= 1;
+        if carry {
+            X ^= p
+        }
+        acc = acc.saturating_add(1i32);
+    }
+    p
+}
+
+const GCM_MODULO: u128 = 0x87;

@@ -25,12 +25,13 @@ The random number generator used in generating keys might not be totally secure.
   - PCBC
   - CFB
   - OFB
+  - CTR
 
 ## Future
 
 I am planning on implementing
 
-- More Block Cypher modes: GCM, CTR
+- More Block Cypher modes: GCM, EAX, CCM
 - Photon (Need to get proper test vectors)
 - Argon2
 - Diffie-Heilman
