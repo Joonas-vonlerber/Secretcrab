@@ -3,7 +3,8 @@ use crypto_bigint::{
     Limb, NonZero, Random, Uint, U256, U512,
 };
 
-use crate::Integrity::SHA::sha_512;
+use crate::Integrity::SHA::SHA2::sha512;
+use super::AuthenticationError;
 use const_hex::const_decode_to_array;
 use rand::{prelude::*, rngs::OsRng};
 
@@ -50,80 +51,6 @@ const fn invert(res: &GF25519) -> GF25519 {
     res.pow(&GF25519Modulo::MODULUS.wrapping_sub(&U256::from_u8(2)))
 }
 
-fn sqrt(quad_residue: &GF25519) -> Option<(GF25519, GF25519)> {
-    if !is_quadratic_residue(quad_residue) && quad_residue.as_montgomery() != &U256::ZERO {
-        return None;
-    }
-    // Factor modulo-1 into Q*2^S, where Q is odd
-    let mut Q: U256 = GF25519Modulo::MODULUS.wrapping_sub(&U256::ONE);
-    let mut S: u32 = 0;
-    while Q.rem2k(1) == U256::ZERO {
-        Q >>= 1usize;
-        S += 1;
-    }
-    assert_eq!(
-        Q.wrapping_mul(&(U256::from_u8(1) << S as usize)),
-        GF25519Modulo::MODULUS.wrapping_sub(&U256::ONE)
-    );
-
-    // Find a non quadratic residue
-    let mut rng = OsRng;
-    let mut non_residue: GF25519 = GF25519::random(&mut rng);
-    while is_quadratic_residue(&non_residue) || non_residue.as_montgomery() == &U256::ZERO {
-        non_residue = GF25519::random(&mut rng);
-    }
-    let mut M: U256 = U256::from_u32(S);
-    let mut c: GF25519 = non_residue.pow(&Q);
-    let mut t: GF25519 = quad_residue.pow(&Q);
-    let mut R: GF25519 = quad_residue.pow(
-        // quadresidue^((Q+1)/2)
-        &Q.wrapping_add(&U256::ONE).wrapping_div(&U256::from_u8(2)),
-    );
-    let mut i: U256 = U256::ZERO;
-    let mut b: GF25519;
-    let mut repeated_squared_t: GF25519 = t;
-
-    loop {
-        // Do we return?
-        if t.as_montgomery() == &U256::ZERO {
-            return Some((GF25519::ZERO, GF25519::ZERO));
-        } else if t.as_montgomery() == &GF25519Modulo::R {
-            return Some((R, R.neg()));
-        }
-
-        // Find i
-        while repeated_squared_t.as_montgomery() != &GF25519Modulo::R {
-            i = i.wrapping_add(&U256::ONE);
-            repeated_squared_t = repeated_squared_t.square();
-        }
-        if i == M {
-            return None;
-        }
-        b = c.pow(
-            &residue!(2)
-                .pow(&(M.wrapping_sub(&i).wrapping_sub(&U256::ONE)))
-                .retrieve(),
-        ); // c^(2^(M-i-1)), tän 2^fasfd vois tehä ainaki shiftauksella mut ku moduloooo :DDDD
-        M = i;
-        c = b.square();
-        t = t.mul(&b.square());
-        R = R.mul(&b);
-
-        i = U256::ZERO;
-        repeated_squared_t = t;
-    }
-}
-
-fn is_quadratic_residue(candidate: &GF25519) -> bool {
-    let legrende: U256 = candidate
-        .pow(
-            &GF25519Modulo::MODULUS
-                .wrapping_sub(&U256::ONE)
-                .wrapping_div(&U256::from_u8(2)),
-        )
-        .retrieve();
-    legrende == U256::ONE
-}
 
 #[derive(Debug, Clone, Copy)]
 /// Point on the curve Ed25519 represented in extended twisted edwards coordinates e.g four coordinates X,Y,T,Z, where for an affine point (x,y)
@@ -136,18 +63,18 @@ struct Ed25519 {
 }
 
 impl Ed25519 {
-    /// the order of the finite field used for the curve eg. 2^255 - 19
+    /// the order of the finite field used for the curve e.g. 2^255 - 19
     const PRIME: U256 = GF25519Modulo::MODULUS;
 
     const ORDER: U256 =
         U256::from_be_hex("1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed");
 
-    /// the d coefficient of the curve eg. -121665/121666
+    /// the d coefficient of the curve e.g. -121665/121666
     const COEFF: GF25519 = div(&residue!(121665).neg(), &residue!(121666));
     /// returns the element one in the finite field of the curve
     const ONE: GF25519 = GF25519::ONE;
 
-    /// the neutral element for addition for the curve eg. the point (0,1)
+    /// the neutral element for addition for the curve e.g. the point (0,1)
     const NEUTRAL: Ed25519 = Ed25519 {
         x: GF25519::ZERO,
         y: GF25519::ONE,
@@ -165,7 +92,7 @@ impl Ed25519 {
         .wrapping_sub(&U256::from_u8(5))
         .wrapping_div(&U256::from_u8(8));
 
-    const BASE: Ed25519 = Ed25519::from_y(div(&residue!(4), &residue!(5)), true).unwrap();
+    const BASE: Ed25519 = match Ed25519::from_y(div(&residue!(4), &residue!(5)), true) {Some(x) => x, None => unreachable!()};
 
     #[inline]
     /// Check if the coordinate is "positive" or not. In this context positive is defined to be a coordinate, which is even.
@@ -191,7 +118,7 @@ impl Ed25519 {
         } else {
             coord1
         }
-    }
+    } 
 
     #[inline]
     /// Make a curve point on Ed25519 using the Y-coordinate of the point and whether is it positive or not
@@ -404,32 +331,31 @@ pub fn generate_private_key() -> [u8; 32] {
 /// Auxillary function for signing and verifying when converting between U512 and U256
 fn le_int_from_byte_mod_order(input: [u8; 64]) -> U256 {
     U512::from_le_bytes(input)
-        .rem(&NonZero::new(Ed25519::ORDER.mul(&U256::ONE)).unwrap())
+        .rem(&NonZero::new(Ed25519::ORDER.mul(&U256::ONE)).expect("order * 1 > 0, order != 0"))
         .split()
         .1
 }
 
 /// Sign a message using the Ed25519 digital signature algorithm and generate a public key with the given private key.
-pub fn Ed25519_sign_gen_pub_key(message: &[u8], private_key: [u8; 32]) -> ([u8; 64], [u8; 32]) {
+pub fn Ed25519_sign_gen_pub_key(message: &[u8],private_key: [u8; 32]) -> ([u8; 64], [u8; 32]) {
     // Generate keys
-    let private_hash = sha_512(&private_key);
+    let private_hash = sha512(&private_key);
     let mut s_bytes: Vec<u8> = private_hash.into_iter().take(32).collect();
     s_bytes[0] &= 0b11111000;
     s_bytes[31] &= 0b01111111;
     s_bytes[31] |= 0b01000000;
-    let s: U256 = U256::from_le_bytes(s_bytes.try_into().unwrap());
+    let s: U256 = U256::from_le_bytes(s_bytes.try_into().expect("take 32, 64 > 32"));
     let base = Ed25519::BASE;
     let public_key: [u8; 32] = base.mul(s).to_byte_array();
 
     // Sign message
     let prefix: Vec<u8> = private_hash.into_iter().skip(32).collect();
-    let r: U256 = le_int_from_byte_mod_order(sha_512(&[&prefix, message].concat()));
+    let r: U256 = le_int_from_byte_mod_order(sha512(&[&prefix, message].concat()));
     let R: [u8; 32] = base.mul(r).to_byte_array();
-    let k: U256 = le_int_from_byte_mod_order(sha_512(&[&R, &public_key, message].concat()));
+    let k: U256 = le_int_from_byte_mod_order(sha512(&[&R, &public_key, message].concat()));
     let S = le_int_from_byte_mod_order((k.mul(&s)).to_le_bytes()).add_mod(&r, &Ed25519::ORDER);
-
     (
-        [R, S.to_le_bytes()].concat().try_into().unwrap(),
+        [R, S.to_le_bytes()].concat().try_into().expect("32 + 32 = 64"),
         public_key,
     )
 }
@@ -439,56 +365,43 @@ pub fn Ed25519_sign_with_keys(
     private_key: [u8; 32],
     public_key: [u8; 32],
 ) -> [u8; 64] {
-    let private_hash = sha_512(&private_key);
+    let private_hash = sha512(&private_key);
     let mut s_bytes: Vec<u8> = private_hash.into_iter().take(32).collect();
     s_bytes[0] &= 0b11111000;
     s_bytes[31] &= 0b01111111;
     s_bytes[31] |= 0b01000000;
-    let s: U256 = U256::from_le_bytes(s_bytes.try_into().unwrap());
+    let s: U256 = U256::from_le_bytes(s_bytes.try_into().expect("take 32, 64 > 32"));
     let base = Ed25519::BASE;
 
     // Sign message
     let prefix: Vec<u8> = private_hash.into_iter().skip(32).collect();
-    let r: U256 = le_int_from_byte_mod_order(sha_512(&[&prefix, message].concat()));
+    let r: U256 = le_int_from_byte_mod_order(sha512(&[&prefix, message].concat()));
     let R: [u8; 32] = base.mul(r).to_byte_array();
-    let k: U256 = le_int_from_byte_mod_order(sha_512(&[&R, &public_key, message].concat()));
+    let k: U256 = le_int_from_byte_mod_order(sha512(&[&R, &public_key, message].concat()));
     let S = le_int_from_byte_mod_order((k.mul(&s)).to_le_bytes()).add_mod(&r, &Ed25519::ORDER);
-    [R, S.to_le_bytes()].concat().try_into().unwrap()
+    [R, S.to_le_bytes()].concat().try_into().expect("32 + 32 = 64")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum VerificationError {
-    BadSignature,
-    BadPublicKey,
-    SignatureNotMatchMessage,
-}
 
 pub fn Ed25519_verify_sign(
     message: &[u8],
     signature: [u8; 64],
     public_key: [u8; 32],
-) -> Result<(), VerificationError> {
+) -> Result<(), AuthenticationError> {
     let (r_bytes, s_bytes) = signature.split_at(32);
-    let R: Ed25519 = match Ed25519::from_byte_array(r_bytes.try_into().unwrap()) {
-        // Will always be [u8; 32]
-        Some(a) => a,
-        None => return Err(VerificationError::BadSignature),
-    };
-    let S: U256 = U256::from_le_bytes(s_bytes.try_into().unwrap()); // Will always be [u8; 32]
+    let R: Ed25519 = Ed25519::from_byte_array(r_bytes.try_into().expect("64 / 2 = 32")).ok_or(AuthenticationError::BadSignature)?;
+    let S: U256 = U256::from_le_bytes(s_bytes.try_into().expect("64 / 2 = 32")); // Will always be [u8; 32]
 
-    let A = match Ed25519::from_byte_array(public_key) {
-        Some(a) => a,
-        None => return Err(VerificationError::BadPublicKey),
-    };
+    let A = Ed25519::from_byte_array(public_key).ok_or(AuthenticationError::BadPublicKey)?;
 
-    let k = U512::from_le_bytes(sha_512(
+    let k = U512::from_le_bytes(sha512(
         &[&R.to_byte_array(), &A.to_byte_array(), message].concat(),
     ));
 
     let base = Ed25519::BASE;
     match base.mul(S) == R.add(&A.mul(k)) {
         true => Ok(()),
-        false => Err(VerificationError::SignatureNotMatchMessage),
+        false => Err(AuthenticationError::SignatureNotMatchMessage),
     }
 }
 
@@ -507,35 +420,7 @@ pub fn Ed25519_verify_sign(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn sqrt_test() {
-        let qr1: GF25519 = residue!(4);
-        let expected_roots: [Option<(GF25519, GF25519)>; 2] = [
-            Some((residue!(2), residue!(2).neg())),
-            Some((residue!(2).neg(), residue!(2))),
-        ];
-        assert!(expected_roots.contains(&sqrt(&qr1)));
 
-        let qr2: GF25519 = residue!(9);
-        let expected_roots: [Option<(GF25519, GF25519)>; 2] = [
-            Some((residue!(3), residue!(3).neg())),
-            Some((residue!(3).neg(), residue!(3))),
-        ];
-        assert!(expected_roots.contains(&sqrt(&qr2)));
-
-        let qr3: GF25519 = residue!(16);
-        let expected_roots: [Option<(GF25519, GF25519)>; 2] = [
-            Some((residue!(4), residue!(4).neg())),
-            Some((residue!(4).neg(), residue!(4))),
-        ];
-        assert!(expected_roots.contains(&sqrt(&qr3)));
-
-        let qr4: GF25519 = residue!(13);
-
-        assert_eq!(sqrt(&qr4), None);
-    }
-
-    #[test]
     fn ed25519_base_point_test() {
         std::env::set_var("RUST_BACKTRACE", "1");
         let base = Ed25519::BASE;

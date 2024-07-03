@@ -1,6 +1,6 @@
 [package]
 name = "secretcrab"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -12,3 +12,5 @@ ndarray = "0.15.6"
 crypto-bigint = "0.5.3"
 const-hex = "1.10.0"
 num-traits = "0.2.17"
+thiserror = "1.0.61"
+zeroize = "1.8.1"

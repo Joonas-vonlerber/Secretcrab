@@ -16,17 +16,18 @@ pub(crate) fn zip_with<const N: usize, T, U, V: Debug, F: Fn(T, U) -> V>(
         .unwrap()
 }
 
-fn extended_sponge<F1, F2, const OUTPUT_LEN: usize, const STATE_SIZE: usize>(
-    perm_fun: F1,
-    pad_fun: F2,
+#[inline]
+fn extended_sponge<PR, PD, const OUTPUT_LEN: usize, const STATE_SIZE: usize>(
+    perm_fun: PR,
+    pad_fun: PD,
     absorb_rate: usize,
     squeeze_rate: usize,
     initialization_state: [u8; STATE_SIZE],
     input: &[u8],
 ) -> [u8; OUTPUT_LEN]
 where
-    F1: Fn(&mut [u8; STATE_SIZE]),
-    F2: Fn(&[u8], usize) -> Vec<u8>,
+    PR: Fn(&mut [u8; STATE_SIZE]),
+    PD: Fn(&[u8], usize) -> Vec<u8>,
 {
     let padded_message: Vec<u8> = pad_fun(input, absorb_rate);
     assert_eq!(padded_message.len() % absorb_rate, 0);
@@ -59,15 +60,16 @@ where
     output[0..OUTPUT_LEN].try_into().unwrap()
 }
 
-fn sponge<F1, F2, const OUTPUT_LEN: usize, const STATE_SIZE: usize>(
-    perm_fun: F1,
-    pad_fun: F2,
+#[inline]
+fn sponge<PR, PD, const OUTPUT_LEN: usize, const STATE_SIZE: usize>(
+    perm_fun: PR,
+    pad_fun: PD,
     rate: usize,
     input: &[u8],
 ) -> [u8; OUTPUT_LEN]
 where
-    F1: Fn(&mut [u8; STATE_SIZE]),
-    F2: Fn(&[u8], usize) -> Vec<u8>,
+    PR: Fn(&mut [u8; STATE_SIZE]),
+    PD: Fn(&[u8], usize) -> Vec<u8>,
 {
     extended_sponge::<_, _, OUTPUT_LEN, STATE_SIZE>(
         perm_fun,

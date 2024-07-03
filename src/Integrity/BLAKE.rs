@@ -204,7 +204,7 @@ fn pad_with_zeros(input: &[u8], size: u32) -> Vec<u8> {
     }
 }
 
-// BOILERPLATE!!!!!
+// BOILERPLATE!!!!! FUCK THIS SHIT
 
 #[inline]
 fn mix_2s(work_vector: &mut [u32], a: usize, b: usize, c: usize, d: usize, x: u32, y: u32) {
