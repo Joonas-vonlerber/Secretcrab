@@ -3,16 +3,15 @@
 A cryptographic suite made in pure Rust. Includes implementations for the SHA-family of hash functions.
 Also includes encryption algorithms like RSA or AES.
 
-## Implementation security
+## :warning:Implementation security:warning:
 
-I cannot verify the security of my own implementations. For secure purposes I recommend using trusted implementations whenever possible.
+I cannot verify the security of my own implementations. There **is** side channel attacks to my implementations and you should not trust in any way. Use trusted implementations of the algorithms in any remotely secure purposes.
 
-The random number generator used in generating keys might not be totally secure. Check [implementation](https://docs.rs/rand/0.8.5/rand/rngs/struct.OsRng.html)
+For randomness I use [rand](https://docs.rs/rand/0.8.5/rand/) crates [OsRNG](https://docs.rs/rand/0.8.5/rand/rngs/struct.OsRng.html) which gets its randomness from the OS.
 
 ## Features
 
 - XOR encryption & decryption
-- RSA encryption & decryption
 - AES encryption & decryption
 - SHA1
 - SHA224, SHA256, SHA384, SHA512, SHA512/244, SHA512/256
@@ -26,13 +25,18 @@ The random number generator used in generating keys might not be totally secure.
   - CFB
   - OFB
   - CTR
+  - GCM
+
+## Nearly done (needs debugging)
+
+- GCM
+- Photon (need test vectors)
 
 ## Future
 
 I am planning on implementing
 
-- More Block Cypher modes: GCM, EAX, CCM
-- Photon (Need to get proper test vectors)
+- Reimplementation of RSA with OAEP
 - Argon2
 - Diffie-Heilman
 
