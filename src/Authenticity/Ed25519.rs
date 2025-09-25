@@ -1,12 +1,12 @@
 use crypto_bigint::{
     impl_modulus, modular::constant_mod::Residue, modular::constant_mod::ResidueParams, Encoding,
-    Limb, NonZero, Random, Uint, U256, U512,
+    Limb, NonZero, Uint, U256, U512,
 };
 
-use crate::Integrity::SHA::SHA2::sha512;
 use super::AuthenticationError;
+use crate::Integrity::SHA::SHA2::sha512;
 use const_hex::const_decode_to_array;
-use rand::{prelude::*, rngs::OsRng};
+use rand::prelude::*;
 
 const fn ct_eq(lhs_res: &GF25519, rhs_res: &GF25519) -> bool {
     let mut acc = 0;
@@ -51,7 +51,6 @@ const fn invert(res: &GF25519) -> GF25519 {
     res.pow(&GF25519Modulo::MODULUS.wrapping_sub(&U256::from_u8(2)))
 }
 
-
 #[derive(Debug, Clone, Copy)]
 /// Point on the curve Ed25519 represented in extended twisted edwards coordinates e.g four coordinates X,Y,T,Z, where for an affine point (x,y)
 /// X = x/Z, Y = y/Z, T = x*y/Z  
@@ -92,7 +91,10 @@ impl Ed25519 {
         .wrapping_sub(&U256::from_u8(5))
         .wrapping_div(&U256::from_u8(8));
 
-    const BASE: Ed25519 = match Ed25519::from_y(div(&residue!(4), &residue!(5)), true) {Some(x) => x, None => unreachable!()};
+    const BASE: Ed25519 = match Ed25519::from_y(div(&residue!(4), &residue!(5)), true) {
+        Some(x) => x,
+        None => unreachable!(),
+    };
 
     #[inline]
     /// Check if the coordinate is "positive" or not. In this context positive is defined to be a coordinate, which is even.
@@ -118,7 +120,7 @@ impl Ed25519 {
         } else {
             coord1
         }
-    } 
+    }
 
     #[inline]
     /// Make a curve point on Ed25519 using the Y-coordinate of the point and whether is it positive or not
@@ -337,7 +339,7 @@ fn le_int_from_byte_mod_order(input: [u8; 64]) -> U256 {
 }
 
 /// Sign a message using the Ed25519 digital signature algorithm and generate a public key with the given private key.
-pub fn Ed25519_sign_gen_pub_key(message: &[u8],private_key: [u8; 32]) -> ([u8; 64], [u8; 32]) {
+pub fn Ed25519_sign_gen_pub_key(message: &[u8], private_key: [u8; 32]) -> ([u8; 64], [u8; 32]) {
     // Generate keys
     let private_hash = sha512(&private_key);
     let mut s_bytes: Vec<u8> = private_hash.into_iter().take(32).collect();
@@ -355,7 +357,10 @@ pub fn Ed25519_sign_gen_pub_key(message: &[u8],private_key: [u8; 32]) -> ([u8; 6
     let k: U256 = le_int_from_byte_mod_order(sha512(&[&R, &public_key, message].concat()));
     let S = le_int_from_byte_mod_order((k.mul(&s)).to_le_bytes()).add_mod(&r, &Ed25519::ORDER);
     (
-        [R, S.to_le_bytes()].concat().try_into().expect("32 + 32 = 64"),
+        [R, S.to_le_bytes()]
+            .concat()
+            .try_into()
+            .expect("32 + 32 = 64"),
         public_key,
     )
 }
@@ -379,9 +384,11 @@ pub fn Ed25519_sign_with_keys(
     let R: [u8; 32] = base.mul(r).to_byte_array();
     let k: U256 = le_int_from_byte_mod_order(sha512(&[&R, &public_key, message].concat()));
     let S = le_int_from_byte_mod_order((k.mul(&s)).to_le_bytes()).add_mod(&r, &Ed25519::ORDER);
-    [R, S.to_le_bytes()].concat().try_into().expect("32 + 32 = 64")
+    [R, S.to_le_bytes()]
+        .concat()
+        .try_into()
+        .expect("32 + 32 = 64")
 }
-
 
 pub fn Ed25519_verify_sign(
     message: &[u8],
@@ -389,7 +396,8 @@ pub fn Ed25519_verify_sign(
     public_key: [u8; 32],
 ) -> Result<(), AuthenticationError> {
     let (r_bytes, s_bytes) = signature.split_at(32);
-    let R: Ed25519 = Ed25519::from_byte_array(r_bytes.try_into().expect("64 / 2 = 32")).ok_or(AuthenticationError::BadSignature)?;
+    let R: Ed25519 = Ed25519::from_byte_array(r_bytes.try_into().expect("64 / 2 = 32"))
+        .ok_or(AuthenticationError::BadSignature)?;
     let S: U256 = U256::from_le_bytes(s_bytes.try_into().expect("64 / 2 = 32")); // Will always be [u8; 32]
 
     let A = Ed25519::from_byte_array(public_key).ok_or(AuthenticationError::BadPublicKey)?;

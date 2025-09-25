@@ -1,6 +1,5 @@
-use crate::Integrity::Merkle_Damgard::merkle_damgard;
 use super::*;
-
+use crate::Integrity::Merkle_Damgard::merkle_damgard;
 
 fn sha256_comp_fun(state: &mut [u32; 8], chunk: [u8; 64]) {
     let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h]: [u32; 8] = *state;
@@ -43,7 +42,7 @@ fn sha256_comp_fun(state: &mut [u32; 8], chunk: [u8; 64]) {
             g,
         );
     }
-    for (s,x) in state.iter_mut().zip([a,b,c,d,e,f,g,h]) {
+    for (s, x) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
         *s = s.wrapping_add(x);
     }
 }
@@ -129,11 +128,10 @@ fn sha512_comp_fun(state: &mut [u64; 8], chunk: [u8; 128]) {
             g,
         );
     }
-    for (s,x) in state.iter_mut().zip([a,b,c,d,e,f,g,h]) {
+    for (s, x) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
         *s = s.wrapping_add(x);
     }
 }
-
 
 pub fn sha512(input: &[u8]) -> [u8; 64] {
     let IV = [
@@ -194,7 +192,6 @@ fn sha512_IV_generating_function(input: &[u8]) -> [u8; 64] {
         input,
     )
 }
-
 
 fn sha512_to_t<const T_BYTES: usize>(input: &[u8]) -> [u8; T_BYTES] {
     assert!(T_BYTES * 8 < 512, "t cannot be >= 512");

@@ -1,7 +1,9 @@
-
-
 fn xor(message: &[u8], key: &[u8]) -> Vec<u8> {
-    message.iter().zip(key.iter().cycle()).map(|(a,b)| a^b).collect()
+    message
+        .iter()
+        .zip(key.iter().cycle())
+        .map(|(a, b)| a ^ b)
+        .collect()
 }
 
 // Break into pieces of keysize

@@ -1,20 +1,24 @@
+use std::iter::{once, repeat};
+
+use crypto_bigint::modular::runtime_mod::*;
+use crypto_bigint::Uint;
 use num::{bigint::RandBigInt, BigInt, BigUint, Integer, One, Zero};
-use rand::rngs::OsRng;
+use rand::{rngs::OsRng, RngCore};
 #[derive(Debug, PartialEq)]
-pub struct RSAkeypair {
+struct RSAkeypair {
     pub public_key: Vec<u8>,
     pub private_key: Vec<u8>,
     pub modulo: Vec<u8>,
 }
 
-pub fn use_RSA_key(msg: &[u8], key: &[u8], modulo: &[u8]) -> Vec<u8> {
+fn use_RSA_key(msg: &[u8], key: &[u8], modulo: &[u8]) -> Vec<u8> {
     let msg_int = BigUint::from_bytes_be(msg);
     let key_int = BigUint::from_bytes_be(key);
     let modulo_int = BigUint::from_bytes_be(modulo);
     msg_int.modpow(&key_int, &modulo_int).to_bytes_be()
 }
 
-pub fn generate_RSA_keys_modulo(bits: u64) -> RSAkeypair {
+fn generate_RSA_keys_modulo(bits: u64) -> RSAkeypair {
     let p = get_large_prime(bits);
     let q = get_large_prime(bits);
     let modulo = (&p * &q).to_bytes_be();
@@ -52,7 +56,7 @@ fn create_low_level_prime(n: u64) -> BigUint {
     random_number
 }
 
-pub fn miller_rabin_test(candidate: &BigUint) -> bool {
+pub(crate) fn miller_rabin_test(candidate: &BigUint) -> bool {
     let mut rng = OsRng;
     const NUMBER_OF_TRIALS: i32 = 20;
     let mut max_divisions_by_two: u32 = 0;
@@ -124,3 +128,85 @@ const LOW_LEVEL_PRIMES: [u32; 70] = [
     193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293,
     307, 311, 313, 317, 331, 337, 347, 349,
 ];
+
+fn oaep_encode<HASH, MGF, const HLEN: usize>(
+    message: &[u8],
+    rsa_len: u32,
+    label: &[u8],
+    mgf: MGF,
+    hash: HASH,
+) -> Vec<u8>
+where
+    HASH: Fn(&[u8]) -> [u8; HLEN],
+    MGF: Fn(&[u8], u32) -> Vec<u8>,
+{
+    assert!(message.len() <= rsa_len as usize - 2 * HLEN - 2);
+    let lHash = hash(label);
+    let padding_len = rsa_len as usize - message.len() - 2 * HLEN - 2;
+    let db = lHash
+        .iter()
+        .chain(repeat(&0x00).take(padding_len))
+        .chain(once(&0x01))
+        .chain(message);
+    assert_eq!(db.size_hint().0, (rsa_len as usize) - HLEN - 1); // hacky as hell
+
+    let mut seed: [u8; HLEN] = [0; HLEN];
+    OsRng.fill_bytes(&mut seed);
+    let dbmask = mgf(&seed[..], rsa_len - (HLEN as u32) - 1);
+    let maskeddb = db.zip(dbmask).map(|(a, b)| a ^ b).collect::<Vec<_>>();
+    let seedmask: [u8; HLEN] = mgf(&maskeddb, HLEN as u32)
+        .try_into()
+        .expect("mgf produces a vec of length HLEN");
+    seed.iter_mut().zip(seedmask).for_each(|(a, b)| *a ^= b);
+    once(0x00).chain(seed).chain(maskeddb).collect::<Vec<_>>()
+}
+
+fn oaep_decode<HASH, MGF, const HLEN: usize>(
+    decoded: &[u8],
+    rsa_len: u32,
+    label: &[u8],
+    mgf: MGF,
+    hash: HASH,
+) -> Option<Vec<u8>>
+where
+    HASH: Fn(&[u8]) -> [u8; HLEN],
+    MGF: Fn(&[u8], u32) -> Vec<u8>,
+{
+    let lHash = hash(label);
+    let mut decoded_iter = decoded.iter();
+    match decoded_iter.next() {
+        None => return None,
+        Some(a) if *a != 0 => return None,
+        _ => (),
+    }
+    let mut seed = decoded_iter.clone().take(HLEN).copied().collect::<Vec<_>>();
+    let mut db = decoded_iter.skip(HLEN).copied().collect::<Vec<_>>();
+    let seedmask = mgf(&db, HLEN as u32);
+    seed.iter_mut().zip(seedmask).for_each(|(a, b)| *a ^= b);
+    let dbmask = mgf(&seed, rsa_len - (HLEN as u32) - 1);
+    db.iter_mut().zip(dbmask).for_each(|(a, b)| *a ^= b);
+    let dbiter = db.into_iter();
+    let is_hash_correct = dbiter.clone().take(HLEN).eq(lHash);
+    if !is_hash_correct {
+        return None;
+    }
+    Some(dbiter.skip(HLEN).skip_while(|x| *x != 0x01u8).collect())
+}
+
+struct RSAKey<const LIMBS: usize> {
+    public: Uint<1>,
+    private: Uint<LIMBS>,
+    modulo: DynResidueParams<LIMBS>,
+}
+
+fn is_prime<const LIMBS: usize>(x: Uint<LIMBS>) -> bool {
+    false
+}
+
+fn gen_prime<const LIMBS: usize>() -> Uint<LIMBS> {
+    todo!()
+}
+
+fn gen_rsa_keys<const LIMBS: usize>() -> RSAKey<LIMBS> {
+    todo!()
+}

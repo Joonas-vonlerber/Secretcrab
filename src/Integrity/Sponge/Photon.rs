@@ -330,7 +330,7 @@ fn array_to_state<const STATE_SIZE: usize>(
     array: Array2<PhotonCell>,
     block_size: PhotonBlockSize,
 ) -> [u8; STATE_SIZE] {
-    let cellstate = array.into_raw_vec();
+    let (cellstate, _) = array.into_raw_vec_and_offset();
     let state_vec: Vec<u8> = cellstate
         .chunks_exact(2)
         .flat_map(|xs| photoncell_to_u8((xs[0], xs[1]), block_size))

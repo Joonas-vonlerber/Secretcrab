@@ -1,6 +1,9 @@
 use ndarray::prelude::*;
 
-use crate::Block_cypher::{BlockCypher, Counter, Padding, CBC, CFB, CTR, ECB, OFB, PCBC};
+use crate::Block_Cipher::{
+    ghash, BlockCipher, Counter, Padding, CBC, CFB, CTR, ECB, GCM128, OFB, PCBC,
+};
+use zeroize::Zeroize;
 type AESState = Array2<u8>;
 
 #[derive(Debug, PartialEq)]
@@ -53,16 +56,19 @@ fn key_schedule(original_key: &[u32], round_keys_needed: usize) -> Vec<u32> {
             i => expanded_keys[i - lenght] ^ expanded_keys[i - 1],
         })
     }
-    expanded_keys
-    // .chunks(4)
-    // .map(|key| {
-    //     Array2::from_shape_vec(
-    //         (4, 4).f(),
-    //         key.iter().flat_map(|word| word.to_be_bytes()).collect(),
-    //     )
-    //     .unwrap()
-    // })
-    // .collect::<Vec<_>>()
+    expanded_keys // .chunks(4)
+                  // .map(|key| {
+                  //     Array2::from_shape_vec(
+                  //         (4, 4).f(),
+                  //         key.iter().flat_map(|word| word.to_be_bytes()).collect(),
+                  //     )
+                  //     .unwrap()
+                  // })
+                  // .collect::<Vec<_>>()
+}
+
+fn zero_out_keys(keys: &mut [AESState]) {
+    keys.iter_mut().for_each(|x| x.map_inplace(|y| y.zeroize()))
 }
 
 fn words_to_state(words: &[u32; 4]) -> AESState {
@@ -192,11 +198,15 @@ fn encryption<const KEY_SIZE_BYTES: usize>(
         _ => unimplemented!("AES not defined for {} bit keys", KEY_SIZE_BYTES * 8),
     };
     let key_in_32_bit: Vec<u32> = key
-        .array_chunks::<4>()
-        .map(|x| u32::from_be_bytes(*x))
+        .chunks_exact(4)
+        .map(|x| u32::from_be_bytes(x.try_into().expect("Chunks exact")))
         .collect();
-    let round_keys: Vec<AESState> = key_schedule(&key_in_32_bit, needed_keys)
-        .array_chunks::<4>()
+    let mut round_keys: Vec<AESState> = key_schedule(&key_in_32_bit, needed_keys)
+        .chunks_exact(4)
+        .map(|x| {
+            x.try_into()
+                .expect("Chunks_exact should be exactly 4 chunks")
+        })
         .map(words_to_state)
         .collect();
 
@@ -212,7 +222,9 @@ fn encryption<const KEY_SIZE_BYTES: usize>(
     shift_rows(&mut state);
     add_round_key(&mut state, round_keys.last().unwrap());
 
-    state.into_raw_vec().try_into().unwrap()
+    zero_out_keys(&mut round_keys);
+    let (vec, _) = state.into_raw_vec_and_offset();
+    vec.try_into().unwrap()
 }
 
 fn decryption<const KEY_SIZE_BYTES: usize>(
@@ -227,13 +239,15 @@ fn decryption<const KEY_SIZE_BYTES: usize>(
         _ => unimplemented!("AES not defined for {} bit keys", KEY_SIZE_BYTES * 8),
     };
     let key_in_32_bit: Vec<u32> = key
-        .array_chunks::<4>()
-        .map(|x| u32::from_be_bytes(*x))
+        .chunks_exact(4)
+        .map(|x| {
+            u32::from_be_bytes(<[u8; 4]>::try_from(x).expect("Chunks_exact should be correct"))
+        })
         .collect();
 
-    let round_keys: Vec<AESState> = key_schedule(&key_in_32_bit, needed_keys)
-        .array_chunks::<4>()
-        .map(words_to_state)
+    let mut round_keys: Vec<AESState> = key_schedule(&key_in_32_bit, needed_keys)
+        .chunks_exact(4)
+        .map(|x| words_to_state(x.try_into().expect("Chunks exact")))
         .rev()
         .collect();
 
@@ -249,7 +263,9 @@ fn decryption<const KEY_SIZE_BYTES: usize>(
     inverse_sub_bytes(&mut state);
     add_round_key(&mut state, round_keys.last().unwrap());
 
-    state.into_raw_vec().try_into().unwrap()
+    zero_out_keys(&mut round_keys);
+    let (vec, _) = state.into_raw_vec_and_offset();
+    vec.try_into().unwrap()
 }
 
 fn pad_ANSIX923_message(input: &[u8]) -> Vec<u8> {
@@ -277,32 +293,32 @@ fn block_to_array(block: [u8; 16]) -> AESState {
     Array2::from_shape_vec((4, 4).f(), block.to_vec()).expect("Block should have been 16 bytes")
 }
 
-struct AES;
+pub struct AES;
 
-impl BlockCypher<16, 16> for AES {
+impl BlockCipher<16, 16> for AES {
     fn encrypt_block(key: &[u8; 16], plain_text_block: &[u8; 16]) -> [u8; 16] {
         encryption::<16>(*plain_text_block, key)
     }
-    fn decrypt_block(key: &[u8; 16], cypher_text_block: &[u8; 16]) -> [u8; 16] {
-        decryption::<16>(*cypher_text_block, key)
+    fn decrypt_block(key: &[u8; 16], ciphertext_block: &[u8; 16]) -> [u8; 16] {
+        decryption::<16>(*ciphertext_block, key)
     }
 }
 
-impl BlockCypher<16, 24> for AES {
+impl BlockCipher<16, 24> for AES {
     fn encrypt_block(key: &[u8; 24], plain_text_block: &[u8; 16]) -> [u8; 16] {
         encryption::<24>(*plain_text_block, key)
     }
-    fn decrypt_block(key: &[u8; 24], cypher_text_block: &[u8; 16]) -> [u8; 16] {
-        decryption::<24>(*cypher_text_block, key)
+    fn decrypt_block(key: &[u8; 24], ciphertext_block: &[u8; 16]) -> [u8; 16] {
+        decryption::<24>(*ciphertext_block, key)
     }
 }
 
-impl BlockCypher<16, 32> for AES {
+impl BlockCipher<16, 32> for AES {
     fn encrypt_block(key: &[u8; 32], plain_text_block: &[u8; 16]) -> [u8; 16] {
         encryption::<32>(*plain_text_block, key)
     }
-    fn decrypt_block(key: &[u8; 32], cypher_text_block: &[u8; 16]) -> [u8; 16] {
-        decryption::<32>(*cypher_text_block, key)
+    fn decrypt_block(key: &[u8; 32], ciphertext_block: &[u8; 16]) -> [u8; 16] {
+        decryption::<32>(*ciphertext_block, key)
     }
 }
 /// PKCS#5 padding
@@ -341,15 +357,16 @@ fn unpad_PKCS5<const AMOUNT: usize>(data: [u8; AMOUNT]) -> Result<Vec<u8>, [u8; 
 }
 
 impl Padding<16> for AES {
-    /// PCKS#5 padding for the AES block cypher
+    /// PCKS#5 padding for the AES block cipher
     fn pad(data: &[u8]) -> impl Iterator<Item = [u8; 16]> {
-        let block_iterator = data.array_chunks::<16>();
+        let block_iterator = data.chunks_exact(16);
         let remainder = block_iterator.remainder();
         block_iterator
+            .map(|x| x.try_into().expect("Chunks exact"))
             .copied()
             .chain(std::iter::once(pad_PKCS5::<16>(remainder)))
     }
-    /// PCKS#5 unpadding for the AES block cypher
+    /// PCKS#5 unpadding for the AES block cipher
     /// ## Panics
     /// if data.len() = 0
     fn unpad(data: &[[u8; 16]]) -> Vec<u8> {
@@ -366,15 +383,23 @@ impl Padding<16> for AES {
 }
 
 impl Counter<16> for AES {
-    type Counter = u128;
+    type Counter = ([u8; 12], u32);
     fn init_counter(init: [u8; 16]) -> Self::Counter {
-        u128::from_be_bytes(init)
+        let high: [u8; 12] = init[..12].try_into().expect("Counter high was wrong size");
+        let low: u32 =
+            u32::from_be_bytes(init[12..16].try_into().expect("Counter low was wrong size"));
+        (high, low)
     }
     fn increment(counter: &Self::Counter) -> Self::Counter {
-        counter.wrapping_add(1)
+        let (high, low) = counter;
+        (*high, low.wrapping_add(1))
     }
     fn to_block(counter: &Self::Counter) -> [u8; 16] {
-        counter.to_be_bytes()
+        let (high, low) = counter;
+        [high.as_slice(), low.to_be_bytes().as_slice()]
+            .concat()
+            .try_into()
+            .expect("Counter concat was wrong size")
     }
 }
 
@@ -499,9 +524,9 @@ fn encryption_decryption_test() {
         0x9b, 0x12, 0xe8, 0xca, 0x6d, 0xc6, 0x16, 0x11, 0x2b, 0x50, 0xd2, 0xf3, 0x86, 0xca, 0x81,
         0x00,
     ];
-    let cypher = encryption(*plain, &key);
-    assert_eq!(cypher, should_crypt);
-    assert_eq!(decryption(cypher, &key), *plain);
+    let cipher = encryption(*plain, &key);
+    assert_eq!(cipher, should_crypt);
+    assert_eq!(decryption(cipher, &key), *plain);
 }
 
 #[test]
@@ -539,7 +564,8 @@ fn ecb_encryption_decryption_test() {
         0x0f,
     ];
     let encrypted_should_message = ECB_ANSWER
-        .array_chunks::<16>()
+        .chunks_exact(16)
+        .map(|x| x.try_into().unwrap())
         .copied()
         .collect::<Vec<[u8; 16]>>();
     let encrypted_message = AES::ecb_encrypt(&key, message);
@@ -556,7 +582,8 @@ fn cbc_encrypt_decrypt_test() {
         0x0f,
     ];
     let encypted_should_message = CBC_ANSWER
-        .array_chunks::<16>()
+        .chunks_exact(16)
+        .map(|x| x.try_into().unwrap())
         .copied()
         .collect::<Vec<[u8; 16]>>();
     let encrypted_message = AES::cbc_encrypt(&key, message, [0x01; 16]);
@@ -623,6 +650,40 @@ fn ctr_encrypt_decrypt_test() {
     let decrypted_message = AES::ctr_decrypt(&key, &encrypted_message, [0x01; 16]);
     assert_eq!(decrypted_message, message.to_vec());
 }
+
+// #[test]
+// fn gcm_ghash_test() {
+//     let h1: u128 = 0x66e94bd4ef8a2c3b884cfa59ca342b2e;
+//     let should_ghash1 = [0x00; 16];
+//     assert_eq!(should_ghash1, ghash(h1, &[], &[]));
+
+//     let h2: u128 = 0x66e94bd4ef8a2c3b884cfa59ca342b2e;
+//     let ciphertext2: [u8; 16] = [0x03,0x88,0xda,0xce,0x60,0xb6,0xa3,0x92,0xf3,0x28,0xc2,0xb9,0x71,0xb2,0xfe,0x78];
+//     let should_ghash2: [u8; 16] = [0xf3,0x8c,0xbb,0x1a,0xd6,0x92,0x23,0xdc,0xc3,0x45,0x7a,0xe5,0xb6,0xb0,0xf8,0x85];
+//     assert_eq!(should_ghash2, ghash(h2, &[], &ciphertext2));
+
+//     let h3: u128 = 0xb83b533708bf535d0aa6e52980d53b78;
+//     let ciphertext3 = [0x42u8,0x83,0x1e,0xc2,0x21,0x77,0x74,0x24,0x4b,0x72,0x21,0xb7,0x84,0xd0,0xd4,0x9c,0xe3,0xaa,0x21,0x2f,0x2c,0x02,0xa4,0xe0,0x35,0xc1,0x7e,0x23,0x29,0xac,0xa1,0x2e,0x21,0xd5,0x14,0xb2,0x54,0x66,0x93,0x1c,0x7d,0x8f,0x6a,0x5a,0xac,0x84,0xaa,0x05,0x1b,0xa3,0x0b,0x39,0x6a,0x0a,0xac,0x97,0x3d,0x58,0xe0,0x91,0x47,0x3f,0x59,0x85];
+//     let should_ghash3: [u8; 16] = [0x7f,0x1b,0x32,0xb8,0x1b,0x82,0x0d,0x02,0x61,0x4f,0x88,0x95,0xac,0x1d,0x4e,0xac];
+//     assert_eq!(should_ghash3, ghash(h3, &[], &ciphertext3));
+
+// }
+
+/*
+#[test]
+fn gcm_encrypt_decrypt_test() {
+    let message = ENCRYPTION_TEST;
+    let key: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
+    ];
+    let (plain_text_answer, tag_answer) = GCM_ANSWER;
+    let (encrypted_message, tag) = AES::gcm_encrypt::<16>(&key, message, &[0x01; 16], &[]);
+    assert_eq!(encrypted_message, plain_text_answer);
+    let decrypted_message = AES::gcm_decrypt(&key, &encrypted_message, &[0x01; 16], tag, &[]);
+    assert_eq!(decrypted_message, Some(message.to_vec()));
+}
+*/
 
 const ENCRYPTION_TEST: &[u8; 257] = b"iha ok, mut ootteko kattonu simpsonit sarjasta jakson himo laski homer :D siina esiintyy koko simpsonit perhe eli myos bart simpsons homer poika fanit saavat nauraa ja naurattaahan se tietty myos vaikka homerin laski kuteet ja muut :D kannattaa kattoo nopee";
 const ECB_ANSWER: [u8; 272] = [
@@ -720,3 +781,29 @@ const CTR_ANSWER: [u8; 257] = [
     0x4e, 0x07, 0x8f, 0xac, 0x4e, 0x96, 0xe3, 0xb7, 0xd5, 0x91, 0x32, 0x02, 0x2f, 0x74, 0x14, 0x0b,
     0x24,
 ];
+const GCM_ANSWER: ([u8; 257], [u8; 16]) = (
+    [
+        0xcc, 0xe7, 0x97, 0xe9, 0x46, 0x48, 0x7d, 0xc7, 0x54, 0x8b, 0xfd, 0x59, 0x04, 0x6d, 0xb5,
+        0xf9, 0x8a, 0x1a, 0x72, 0x5f, 0xf3, 0xef, 0x2a, 0x3c, 0xfd, 0x04, 0x0b, 0x48, 0xa8, 0x6c,
+        0x68, 0xb8, 0xef, 0x86, 0x0d, 0x20, 0xab, 0x8a, 0x4b, 0x7d, 0x50, 0xfb, 0x4c, 0x0a, 0x7f,
+        0x7a, 0xae, 0x2a, 0xf9, 0xd5, 0xcb, 0x80, 0xbc, 0x66, 0x7a, 0x52, 0x64, 0xaa, 0x06, 0xea,
+        0xd2, 0xbd, 0x30, 0x54, 0x19, 0x19, 0x1e, 0x91, 0x68, 0xee, 0x32, 0x4a, 0xe0, 0x76, 0xca,
+        0xe8, 0xc9, 0x44, 0x05, 0x0f, 0x56, 0x4d, 0x0c, 0xf6, 0x94, 0xab, 0x48, 0xb2, 0x57, 0x7a,
+        0x47, 0x4c, 0x50, 0x6e, 0x2e, 0x03, 0xa1, 0x9b, 0xd0, 0x83, 0xf4, 0x5d, 0x44, 0x70, 0xdb,
+        0xc7, 0xad, 0x1b, 0xcf, 0x07, 0x2a, 0x80, 0x79, 0xee, 0xea, 0xde, 0x6c, 0x96, 0xd2, 0x96,
+        0x3b, 0xd2, 0xb7, 0x89, 0xae, 0x82, 0x30, 0x76, 0x85, 0x6c, 0xb2, 0x7a, 0xc0, 0x62, 0xce,
+        0xcf, 0x69, 0x65, 0x40, 0x39, 0x4a, 0x65, 0x83, 0xb5, 0xfb, 0x4a, 0xad, 0xf0, 0xeb, 0xf0,
+        0xf9, 0x98, 0x28, 0xd3, 0x5b, 0x48, 0x35, 0x7d, 0x47, 0x82, 0x52, 0x67, 0x60, 0x86, 0xee,
+        0xc4, 0x80, 0xf4, 0x52, 0x06, 0x81, 0x88, 0x3b, 0x35, 0x46, 0x15, 0xd1, 0x19, 0x38, 0xf7,
+        0x0a, 0x09, 0xe3, 0xf5, 0xa6, 0x56, 0x02, 0x18, 0xc9, 0x7c, 0xbb, 0xa2, 0x66, 0xf8, 0xdd,
+        0x4a, 0x73, 0x15, 0x84, 0xb7, 0x86, 0xa2, 0xd7, 0xe5, 0xeb, 0xc6, 0x14, 0xcb, 0x9f, 0x27,
+        0x4c, 0x33, 0x08, 0x26, 0xe2, 0xae, 0x98, 0x30, 0xba, 0x66, 0x1d, 0xf7, 0xda, 0x97, 0xd4,
+        0x9f, 0x85, 0xd3, 0x23, 0x19, 0x21, 0x69, 0xf3, 0x01, 0xc8, 0xa0, 0x39, 0x60, 0x2b, 0x52,
+        0x48, 0xcb, 0xb0, 0x7c, 0x51, 0x43, 0x8a, 0x62, 0xd8, 0x3a, 0x88, 0x11, 0xeb, 0x41, 0x53,
+        0x2a, 0x32,
+    ],
+    [
+        0xee, 0x37, 0x0b, 0x2e, 0x1b, 0x91, 0xbe, 0x44, 0xaa, 0x99, 0x53, 0xce, 0xe7, 0xf6, 0x60,
+        0x26,
+    ],
+);

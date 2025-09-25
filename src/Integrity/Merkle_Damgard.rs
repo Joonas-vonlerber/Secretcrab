@@ -1,4 +1,3 @@
-
 pub(crate) fn merkle_damgard<STATE, C, P, F, const N: usize, const BLOCK_SIZE_BYTES: usize>(
     pad: P,
     compression: C,

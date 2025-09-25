@@ -1,20 +1,7 @@
-use std::fmt::Debug;
-
 pub mod Keccak;
 mod Photon;
 
-pub(crate) fn zip_with<const N: usize, T, U, V: Debug, F: Fn(T, U) -> V>(
-    arr1: [T; N],
-    arr2: [U; N],
-    f: F,
-) -> [V; N] {
-    arr1.into_iter()
-        .zip(arr2)
-        .map(|(a, b)| f(a, b))
-        .collect::<Vec<V>>()
-        .try_into()
-        .unwrap()
-}
+use crate::zip_with;
 
 #[inline]
 fn extended_sponge<PR, PD, const OUTPUT_LEN: usize, const STATE_SIZE: usize>(
@@ -194,15 +181,15 @@ where
 //         let mut tag: [u8; BLOCK_SIZE] = self
 //             .duplex
 //             .duplex(&[&last_header_block[..], &[0x01][..]].concat());
-//         let mut cypher: [u8; BLOCK_SIZE] = xor_array(
+//         let mut cipher: [u8; BLOCK_SIZE] = xor_array(
 //             **plain_text_blocks
 //                 .peek()
 //                 .expect("no first plaintext element"),
 //             tag,
 //         );
 
-//         let mut cypher_text: Vec<u8> = Vec::with_capacity(plain_text.len());
-//         cypher_text.extend_from_slice(&cypher);
+//         let mut ciphertext: Vec<u8> = Vec::with_capacity(plain_text.len());
+//         ciphertext.extend_from_slice(&cipher);
 
 //         for _ in 0..plain_text_block_len {
 //             tag = self.duplex.duplex(&concat_with(
@@ -211,7 +198,7 @@ where
 //                     .expect("no next plane_text block was found"),
 //                 0x01,
 //             ));
-//             // cypher = xor_array(plain_text_blocks.peek().expect(msg), array2) // There is a bug right here, it doesn't account for the last block size, since it might not be exactly BLOCK_SIZE
+//             // cipher = xor_array(plain_text_blocks.peek().expect(msg), array2) // There is a bug right here, it doesn't account for the last block size, since it might not be exactly BLOCK_SIZE
 //             // It is a hard construction to do and implement, might attempt it later
 //         }
 
@@ -222,7 +209,7 @@ where
 //     fn unwrap<const TAG_LEN: usize>(
 //         &mut self,
 //         header: &[u8],
-//         cypher_text: &[u8],
+//         ciphertext: &[u8],
 //         tag: [u8; TAG_LEN],
 //     ) -> Option<Vec<u8>> {
 //         todo!()

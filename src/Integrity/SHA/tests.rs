@@ -1,6 +1,6 @@
-use super::SHA3::*;
-use super::SHA2::*;
 use super::SHA1::*;
+use super::SHA2::*;
+use super::SHA3::*;
 use const_hex::encode;
 use std::env;
 

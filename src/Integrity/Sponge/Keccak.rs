@@ -52,8 +52,8 @@ fn keccak_f_1600(state: &mut [u8; 200]) {
     for i in ROUND_CONSTANTS.iter() {
         round_1600(&mut array, *i);
     }
-    *state = array
-        .into_raw_vec()
+    let (vec, _) = array.into_raw_vec_and_offset();
+    *state = vec
         .iter()
         .flat_map(|word| word.to_le_bytes())
         .collect::<Vec<_>>()

@@ -1,3 +1,4 @@
+
 const SIGMA: [[usize; 16]; 10] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
@@ -26,6 +27,17 @@ const INITIALIZATION_VECTOR_2S: [u32; 8] = [
     0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
 ];
 
+const MIXING_INDECIES: [(usize, usize, usize, usize, usize, usize); 8] = [
+    (0, 4, 8, 12, 0, 1),
+    (1, 5, 9, 13, 2, 3),
+    (2, 6, 10, 14, 4, 5),
+    (3, 7, 11, 15, 6, 7),
+    (0, 5, 10, 15, 8, 9),
+    (1, 6, 11, 12, 10, 11),
+    (2, 7, 8, 13, 12, 13),
+    (3, 4, 9, 14, 14, 15),
+];
+
 #[inline]
 fn mix_2b(work_vector: &mut [u64], a: usize, b: usize, c: usize, d: usize, x: u64, y: u64) {
     work_vector[a] = work_vector[a].wrapping_add(work_vector[b]).wrapping_add(x);
@@ -41,7 +53,7 @@ fn mix_2b(work_vector: &mut [u64], a: usize, b: usize, c: usize, d: usize, x: u6
     work_vector[b] = (work_vector[b] ^ work_vector[c]).rotate_right(63);
 }
 
-fn compress_2b(state: &mut [u64; 8], chunk: &[u8; 128], offset: u128, is_last: bool) {
+fn compress_2b(state: &mut [u64; 8], chunk: &[u8; 128], offset: u64, is_last: bool) {
     // Init work and message vectors
     let mut work_vector: Vec<u64> = [*state, INITIALIZATION_VECTOR_2B].concat();
     let message_chunk: [u64; 16] = chunk
@@ -50,8 +62,8 @@ fn compress_2b(state: &mut [u64; 8], chunk: &[u8; 128], offset: u128, is_last: b
         .collect::<Vec<u64>>()
         .try_into()
         .unwrap();
-    work_vector[12] ^= offset as u64;
-    work_vector[13] ^= (offset >> 64) as u64;
+    work_vector[12] ^= offset;
+    work_vector[13] ^= ((offset as u128) >> 64) as u64;
 
     // invert if last
     if is_last {
@@ -62,78 +74,17 @@ fn compress_2b(state: &mut [u64; 8], chunk: &[u8; 128], offset: u128, is_last: b
     // Throw them into the cryptographic blender
     for i in 0..12 {
         round_sigma = SIGMA[i % 10];
-        mix_2b(
-            &mut work_vector,
-            0,
-            4,
-            8,
-            12,
-            message_chunk[round_sigma[0]],
-            message_chunk[round_sigma[1]],
-        );
-        mix_2b(
-            &mut work_vector,
-            1,
-            5,
-            9,
-            13,
-            message_chunk[round_sigma[2]],
-            message_chunk[round_sigma[3]],
-        );
-        mix_2b(
-            &mut work_vector,
-            2,
-            6,
-            10,
-            14,
-            message_chunk[round_sigma[4]],
-            message_chunk[round_sigma[5]],
-        );
-        mix_2b(
-            &mut work_vector,
-            3,
-            7,
-            11,
-            15,
-            message_chunk[round_sigma[6]],
-            message_chunk[round_sigma[7]],
-        );
-        mix_2b(
-            &mut work_vector,
-            0,
-            5,
-            10,
-            15,
-            message_chunk[round_sigma[8]],
-            message_chunk[round_sigma[9]],
-        );
-        mix_2b(
-            &mut work_vector,
-            1,
-            6,
-            11,
-            12,
-            message_chunk[round_sigma[10]],
-            message_chunk[round_sigma[11]],
-        );
-        mix_2b(
-            &mut work_vector,
-            2,
-            7,
-            8,
-            13,
-            message_chunk[round_sigma[12]],
-            message_chunk[round_sigma[13]],
-        );
-        mix_2b(
-            &mut work_vector,
-            3,
-            4,
-            9,
-            14,
-            message_chunk[round_sigma[14]],
-            message_chunk[round_sigma[15]],
-        );
+        for (a, b, c, d, x, y) in MIXING_INDECIES.into_iter() {
+            mix_2b(
+                &mut work_vector,
+                a,
+                b,
+                c,
+                d,
+                message_chunk[round_sigma[x]],
+                message_chunk[round_sigma[y]],
+            );
+        }
     }
 
     // Xor them in
@@ -155,9 +106,8 @@ pub fn blake2b<const HASH_LEN: usize>(input: &[u8], key: Option<Vec<u8>>) -> [u8
     // Init the state
     let mut state: [u64; 8] = INITIALIZATION_VECTOR_2B;
     state[0] ^= 0x01010000 ^ ((key.len() as u64) << 8) ^ HASH_LEN as u64;
-
-    let mut bytes_compressed: u128 = 0;
-    let mut bytes_remaning: u128 = input.len() as u128;
+    let mut bytes_compressed: u64 = 0;
+    let mut bytes_remaning: u64 = input.len() as u64;
 
     // bake the key in to the message if there is one
     let mut M = input.to_vec();
@@ -166,7 +116,9 @@ pub fn blake2b<const HASH_LEN: usize>(input: &[u8], key: Option<Vec<u8>>) -> [u8
         bytes_remaning += 128;
     }
 
-    // start compressing
+    // We have to do this with a while loop because
+    // with chunks_exact, it doesn't handle the case in which the input
+    // is len % 128 == 0
     let mut chunks = M.chunks(128);
     let mut chunk: [u8; 128];
     while bytes_remaning > 128 {
@@ -242,78 +194,17 @@ fn compress_2s(state: &mut [u32; 8], chunk: &[u8; 64], offset: u64, is_last: boo
     // Throw them into the cryptographic blender
     for i in 0..10 {
         round_sigma = SIGMA[i % 10];
-        mix_2s(
-            &mut work_vector,
-            0,
-            4,
-            8,
-            12,
-            message_chunk[round_sigma[0]],
-            message_chunk[round_sigma[1]],
-        );
-        mix_2s(
-            &mut work_vector,
-            1,
-            5,
-            9,
-            13,
-            message_chunk[round_sigma[2]],
-            message_chunk[round_sigma[3]],
-        );
-        mix_2s(
-            &mut work_vector,
-            2,
-            6,
-            10,
-            14,
-            message_chunk[round_sigma[4]],
-            message_chunk[round_sigma[5]],
-        );
-        mix_2s(
-            &mut work_vector,
-            3,
-            7,
-            11,
-            15,
-            message_chunk[round_sigma[6]],
-            message_chunk[round_sigma[7]],
-        );
-        mix_2s(
-            &mut work_vector,
-            0,
-            5,
-            10,
-            15,
-            message_chunk[round_sigma[8]],
-            message_chunk[round_sigma[9]],
-        );
-        mix_2s(
-            &mut work_vector,
-            1,
-            6,
-            11,
-            12,
-            message_chunk[round_sigma[10]],
-            message_chunk[round_sigma[11]],
-        );
-        mix_2s(
-            &mut work_vector,
-            2,
-            7,
-            8,
-            13,
-            message_chunk[round_sigma[12]],
-            message_chunk[round_sigma[13]],
-        );
-        mix_2s(
-            &mut work_vector,
-            3,
-            4,
-            9,
-            14,
-            message_chunk[round_sigma[14]],
-            message_chunk[round_sigma[15]],
-        );
+        for (a, b, c, d, x, y) in MIXING_INDECIES.into_iter() {
+            mix_2s(
+                &mut work_vector,
+                a,
+                b,
+                c,
+                d,
+                message_chunk[round_sigma[x]],
+                message_chunk[round_sigma[y]],
+            );
+        }
     }
 
     // Xor them in
